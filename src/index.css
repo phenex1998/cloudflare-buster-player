@@ -35,36 +35,36 @@
   }
 
   .dark {
-    --background: 225 25% 6%;
+    --background: 225 25% 4%;
     --foreground: 210 20% 92%;
-    --card: 225 22% 9%;
+    --card: 225 22% 7%;
     --card-foreground: 210 20% 92%;
-    --popover: 225 22% 9%;
+    --popover: 225 22% 7%;
     --popover-foreground: 210 20% 92%;
     --primary: 262 80% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 225 18% 14%;
+    --secondary: 225 18% 12%;
     --secondary-foreground: 210 20% 85%;
-    --muted: 225 15% 15%;
+    --muted: 225 15% 13%;
     --muted-foreground: 215 15% 55%;
     --accent: 262 40% 18%;
     --accent-foreground: 262 80% 75%;
     --destructive: 0 62% 45%;
     --destructive-foreground: 0 0% 100%;
-    --border: 225 15% 16%;
-    --input: 225 15% 16%;
+    --border: 225 15% 14%;
+    --input: 225 15% 14%;
     --ring: 262 80% 60%;
-    --sidebar-background: 225 25% 8%;
+    --sidebar-background: 225 25% 6%;
     --sidebar-foreground: 210 20% 85%;
     --sidebar-primary: 262 80% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 225 18% 14%;
+    --sidebar-accent: 225 18% 12%;
     --sidebar-accent-foreground: 210 20% 85%;
-    --sidebar-border: 225 15% 16%;
+    --sidebar-border: 225 15% 14%;
     --sidebar-ring: 262 80% 60%;
 
-    --iptv-surface: 225 20% 12%;
-    --iptv-surface-hover: 225 18% 16%;
+    --iptv-surface: 225 20% 10%;
+    --iptv-surface-hover: 225 18% 14%;
     --iptv-glow: 262 80% 60%;
     --iptv-success: 142 70% 45%;
     --iptv-live: 0 80% 55%;
@@ -76,22 +76,51 @@
     @apply border-border;
   }
 
-  body {
+  html, body, #root {
     @apply bg-background text-foreground;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
   }
+}
+
+/* Glassmorphism utilities */
+.glass-card {
+  background: hsla(0, 0%, 100%, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid hsla(0, 0%, 100%, 0.08);
+  border-radius: 1rem;
+}
+
+.glass-card:hover {
+  background: hsla(0, 0%, 100%, 0.07);
+  border-color: hsla(262, 80%, 60%, 0.3);
+  box-shadow: 0 0 24px hsla(262, 80%, 60%, 0.15);
+}
+
+.glass-sidebar {
+  background: hsla(225, 25%, 4%, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid hsla(0, 0%, 100%, 0.06);
 }
 
 /* Custom scrollbar for dark theme */
 .dark ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 .dark ::-webkit-scrollbar-track {
-  background: hsl(225 25% 6%);
+  background: transparent;
 }
 .dark ::-webkit-scrollbar-thumb {
-  background: hsl(225 15% 25%);
-  border-radius: 3px;
+  background: hsla(225, 15%, 30%, 0.5);
+  border-radius: 2px;
 }
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* Video player styles */
 .video-container {

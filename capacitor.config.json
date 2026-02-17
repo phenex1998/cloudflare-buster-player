@@ -4,7 +4,8 @@
   "webDir": "dist",
   "androidScheme": "http",
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": true,
+    "orientation": "landscape"
   },
   "server": {
     "allowNavigation": ["*"],
