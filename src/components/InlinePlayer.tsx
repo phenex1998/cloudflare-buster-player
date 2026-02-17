@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
+import Hls from 'hls.js';
 import { Maximize, Heart, Radio } from 'lucide-react';
 import { useIptv } from '@/contexts/IptvContext';
 import { cn } from '@/lib/utils';
@@ -14,55 +15,71 @@ interface InlinePlayerProps {
 
 const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, streamType = 'live', streamIcon }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const { toggleFavorite, isFavorite } = useIptv();
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
   const native = isAndroid();
 
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Cleanup previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
     if (!url) {
+      video.removeAttribute('src');
+      video.load();
       setCurrentUrl(null);
       return;
     }
 
     const cleanUrl = url.trim();
     setCurrentUrl(cleanUrl);
-    console.log('[InlinePlayer] URL:', cleanUrl, '| native:', native);
+    console.log('[InlinePlayer] Loading via HLS.js:', cleanUrl);
 
-    if (native) {
-      import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-        const VP = VideoPlayer;
-        VP.stopAllPlayers().catch(() => {});
-
-        setTimeout(() => {
-          VP.initPlayer({
-            mode: 'embedded',
-            url: cleanUrl,
-            playerId: 'embeddedPlayer',
-            componentTag: 'embedded-player-container',
-            title: title || 'Stream',
-            exitOnEnd: false,
-            loopOnEnd: false,
-            showControls: true,
-            displayMode: 'landscape',
-            chromecast: false,
-          }).catch((e: unknown) => console.error('[InlinePlayer] initPlayer error:', e));
-        }, 300);
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
       });
-    } else {
-      const video = videoRef.current;
-      if (video) {
-        video.src = cleanUrl;
-        video.load();
+      hlsRef.current = hls;
+      hls.loadSource(cleanUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
-      }
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.warn('[InlinePlayer] HLS error:', data.type, data.details);
+        if (data.fatal) {
+          // Fallback: try direct src
+          console.log('[InlinePlayer] Fatal HLS error, trying direct src');
+          hls.destroy();
+          hlsRef.current = null;
+          video.src = cleanUrl;
+          video.load();
+          video.play().catch(() => {});
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // iOS Safari native HLS
+      video.src = cleanUrl;
+      video.load();
+      video.play().catch(() => {});
+    } else {
+      // Direct fallback
+      video.src = cleanUrl;
+      video.load();
+      video.play().catch(() => {});
     }
 
     return () => {
-      if (native) {
-        import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-          const VP = VideoPlayer;
-          VP.stopAllPlayers().catch(() => {});
-        });
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
     };
   }, [url]);
@@ -70,8 +87,7 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
   const handleFullscreen = useCallback(() => {
     if (native && currentUrl) {
       import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-        const VP = VideoPlayer;
-        VP.initPlayer({
+        VideoPlayer.initPlayer({
           mode: 'fullscreen',
           url: currentUrl,
           playerId: 'fullscreenPlayer',
@@ -92,23 +108,16 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
 
   return (
     <div className="flex flex-col h-full">
-      {/* Player area */}
-      <div
-        id="embedded-player-container"
-        className="relative flex-1 bg-black flex items-center justify-center min-h-0"
-        style={{ width: '100%', height: '100%' }}
-      >
+      <div className="relative flex-1 bg-black flex items-center justify-center min-h-0">
         {url ? (
           <>
-            {!native && (
-              <video
-                ref={videoRef}
-                className="w-full h-full object-contain"
-                autoPlay
-                playsInline
-                controls={false}
-              />
-            )}
+            <video
+              ref={videoRef}
+              className="w-full h-full object-contain"
+              autoPlay
+              playsInline
+              controls={false}
+            />
             <button
               onClick={handleFullscreen}
               className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 hover:bg-black/80 text-white transition-colors z-10"
@@ -125,7 +134,6 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
         )}
       </div>
 
-      {/* Info bar */}
       {url && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-card/80 border-t border-border shrink-0">
           {streamIcon && (
