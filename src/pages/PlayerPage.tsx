@@ -50,10 +50,9 @@ const PlayerPage: React.FC = () => {
             chromecast: false,
           });
 
-          // Em modo embedded, initPlayer resolve imediatamente
-          // A navegação de volta é feita pelo botão manual
+          // initPlayer resolves when the native player closes
           if (!cancelled) {
-            setLoading(false);
+            navigate(-1);
           }
         } else {
           // Web preview fallback
