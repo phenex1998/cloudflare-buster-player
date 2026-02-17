@@ -1,8 +1,9 @@
 /**
- * Android-only native video player via Intent.
- * Opens streams in external players (VLC, MX Player, Just Player, etc.)
- * using ExoPlayer — same approach as XCIPTV.
+ * Native video player for Android using @capgo/capacitor-video-player (ExoPlayer).
+ * Live streams use the native player; VOD uses Android Intent for external players.
  */
+
+import { VideoPlayer } from '@capgo/capacitor-video-player';
 
 export function isAndroid(): boolean {
   return /android/i.test(navigator.userAgent);
@@ -16,13 +17,42 @@ export function isMobile(): boolean {
   return isAndroid() || isIOS();
 }
 
+function isLiveStream(url: string): boolean {
+  const lower = url.toLowerCase();
+  return !lower.endsWith('.mp4') && !lower.endsWith('.mkv') && !lower.endsWith('.avi');
+}
+
 /**
- * Opens a video stream via Android Intent (ExoPlayer/VLC/MX Player).
- * Falls back to window.open and then direct navigation.
+ * Play a stream using the native CapacitorVideoPlayer (ExoPlayer on Android).
+ * Includes a 10s timeout. Throws on failure so the caller can show fallback UI.
  */
-export function playStream(url: string, title?: string): void {
+export async function playWithNativePlayer(url: string, title?: string): Promise<void> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Player timeout (10s)')), 10000)
+  );
+
+  const player = VideoPlayer.initPlayer({
+    mode: 'fullscreen',
+    url,
+    playerId: 'liveplayer',
+    componentTag: 'app-liveplayer',
+    title: title || '',
+    rate: 1.0,
+    exitOnEnd: false,
+    loopOnEnd: true,
+    pipEnabled: true,
+    showControls: true,
+    displayMode: 'landscape',
+  });
+
+  await Promise.race([player, timeout]);
+}
+
+/**
+ * Opens a video stream via Android Intent (VLC/MX Player/external player).
+ */
+export function playWithExternalPlayer(url: string, title?: string): void {
   if (isAndroid()) {
-    // Build Android Intent URI for external video player
     const stripped = url.replace(/^https?:\/\//, '');
     const scheme = url.startsWith('https') ? 'https' : 'http';
 
@@ -42,7 +72,25 @@ export function playStream(url: string, title?: string): void {
       }
     }
   } else {
-    // Fallback for non-Android
     window.open(url, '_blank');
+  }
+}
+
+/**
+ * Main entry point for playing streams.
+ * - Live streams → native player (ExoPlayer) with 10s timeout
+ * - VOD → external player via Intent
+ */
+export async function playStream(url: string, title?: string): Promise<{ fallback: boolean }> {
+  if (isLiveStream(url)) {
+    try {
+      await playWithNativePlayer(url, title);
+      return { fallback: false };
+    } catch {
+      return { fallback: true };
+    }
+  } else {
+    playWithExternalPlayer(url, title);
+    return { fallback: false };
   }
 }
