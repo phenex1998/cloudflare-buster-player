@@ -1,17 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Heart, Radio, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import InlinePlayer from '@/components/InlinePlayer';
 
 const LiveTvPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [activeStream, setActiveStream] = useState<{ url: string; title: string } | null>(null);
 
   const { data: categories = [] } = useQuery({
     queryKey: ['live-categories', credentials?.host],
@@ -53,21 +53,12 @@ const LiveTvPage: React.FC = () => {
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
     if (credentials) {
       const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
-      setActiveStream({ url, title: stream.name });
+      navigate('/player', { state: { url, title: stream.name } });
     }
   };
 
   return (
     <div className="min-h-screen bg-background pb-24">
-      {/* Inline player */}
-      {activeStream && (
-        <InlinePlayer
-          url={activeStream.url}
-          title={activeStream.title}
-          onClose={() => setActiveStream(null)}
-        />
-      )}
-
       {/* Search bar */}
       <div className="px-4 pt-4 pb-2">
         <div className="relative">
