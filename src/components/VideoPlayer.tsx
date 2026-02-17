@@ -8,17 +8,24 @@ interface VideoPlayerProps {
   onBack?: () => void;
 }
 
-// Extract the original URL from a proxied URL for format detection
-function getOriginalUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    const original = u.searchParams.get('url');
-    if (original) return original;
-  } catch {}
-  return url;
+/**
+ * Detect if this is a live stream URL (contains /live/ in the path).
+ */
+function isLiveStream(url: string): boolean {
+  return url.includes('/live/');
 }
 
-// Create a synthetic HLS manifest that points to a single .ts segment
+/**
+ * Convert a .ts live URL to .m3u8 for HLS.js consumption.
+ */
+function toM3u8Url(url: string): string {
+  return url.replace(/\.ts(\?.*)?$/, '.m3u8$1');
+}
+
+/**
+ * Create a synthetic single-segment HLS manifest pointing to a .ts URL.
+ * This forces HLS.js to decode the .ts via MSE instead of native playback.
+ */
 function createSyntheticManifest(tsUrl: string): string {
   const manifest = [
     '#EXTM3U',
@@ -52,120 +59,105 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
     setIsLoading(true);
     setError(null);
 
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    if (syntheticBlobUrl.current) {
-      URL.revokeObjectURL(syntheticBlobUrl.current);
-      syntheticBlobUrl.current = null;
-    }
+    // Cleanup previous instance
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    if (syntheticBlobUrl.current) { URL.revokeObjectURL(syntheticBlobUrl.current); syntheticBlobUrl.current = null; }
 
-    const originalUrl = getOriginalUrl(url);
-    const isLive = originalUrl.includes('/live/');
-    const isHlsExt = originalUrl.includes('.m3u8') || originalUrl.includes('.m3u');
-    const isTsExt = originalUrl.endsWith('.ts');
-
-    // For live streams with .ts extension, build a .m3u8 proxy URL
-    const getM3u8Url = (): string => {
-      if (isLive && isTsExt) {
-        const m3u8Original = originalUrl.replace(/\.ts$/, '.m3u8');
-        if (url !== originalUrl) {
-          const u = new URL(url);
-          u.searchParams.set('url', m3u8Original);
-          return u.toString();
-        }
-        return m3u8Original;
-      }
-      return url;
-    };
+    const isLive = isLiveStream(url);
+    const isTsExt = /\.ts(\?.*)?$/.test(url);
+    const isHlsExt = /\.(m3u8?|m3u)(\?.*)?$/i.test(url);
 
     const onPlaying = () => { setIsLoading(false); setIsPlaying(true); };
     const onWaiting = () => setIsLoading(true);
-    const onError = () => { setError('Erro ao carregar o stream'); setIsLoading(false); };
+    const onVideoError = () => { setError('Erro ao carregar o stream'); setIsLoading(false); };
 
     video.addEventListener('playing', onPlaying);
     video.addEventListener('waiting', onWaiting);
-    video.addEventListener('error', onError);
+    video.addEventListener('error', onVideoError);
 
-    // Timeout: if nothing plays within 15s, show error
+    // Timeout: 15s to detect dead streams
     const timeout = setTimeout(() => {
-      if (isLoading && !error) {
-        console.warn('[VideoPlayer] Playback timeout after 15s');
-        setError('Timeout: não foi possível carregar o stream');
-        setIsLoading(false);
-        if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-      }
+      setError('Timeout: não foi possível carregar o stream');
+      setIsLoading(false);
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     }, 15000);
 
-    if (isHlsExt || isLive) {
-      // --- LIVE / HLS path: always use HLS.js via MSE ---
-      const hlsUrl = getM3u8Url();
-      console.log('[VideoPlayer] HLS playback via MSE:', hlsUrl);
+    const clearTimeoutOnSuccess = () => clearTimeout(timeout);
+
+    if (isLive || isHlsExt || isTsExt) {
+      // ─── HLS/Live path: ALWAYS use HLS.js via MSE ───
+      // For .ts URLs, first try converting to .m3u8 (most IPTV providers support both)
+      const hlsUrl = isTsExt ? toM3u8Url(url) : url;
+      console.log('[VideoPlayer] HLS.js playback (direct URL, no proxy):', hlsUrl);
 
       if (Hls.isSupported()) {
         const startHls = (sourceUrl: string) => {
           const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
+            // xhrSetup: pass-through for direct URLs, no special headers needed
+            // If a provider requires User-Agent or auth, add headers here
+            xhrSetup: (xhr, xhrUrl) => {
+              xhr.open('GET', xhrUrl, true);
+            },
           });
+
           hls.loadSource(sourceUrl);
           hls.attachMedia(video);
+
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             setIsLoading(false);
-            clearTimeout(timeout);
+            clearTimeoutOnSuccess();
             video.play().catch(() => {});
           });
+
           hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (data.fatal) {
-              console.warn('[VideoPlayer] HLS fatal error:', data.type, data.details);
+            if (!data.fatal) return;
+            console.warn('[VideoPlayer] HLS fatal error:', data.type, data.details);
 
-              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                hls.recoverMediaError();
-                return;
-              }
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+              return;
+            }
 
-              // If .m3u8 failed and original was .ts, try synthetic manifest
-              if (isLive && isTsExt && !syntheticBlobUrl.current) {
-                console.log('[VideoPlayer] .m3u8 failed, trying synthetic manifest for .ts');
-                hls.destroy();
-                hlsRef.current = null;
-
-                // Create synthetic manifest pointing to the actual .ts URL (proxied)
-                const blobUrl = createSyntheticManifest(url);
-                syntheticBlobUrl.current = blobUrl;
-                startHls(blobUrl);
-                return;
-              }
-
-              // All HLS attempts failed
+            // If .m3u8 failed and original was .ts, try synthetic manifest
+            if (isTsExt && !syntheticBlobUrl.current) {
+              console.log('[VideoPlayer] .m3u8 failed → synthetic manifest for .ts');
               hls.destroy();
               hlsRef.current = null;
-              setError('Não foi possível reproduzir este canal');
-              setIsLoading(false);
-              clearTimeout(timeout);
+              const blobUrl = createSyntheticManifest(url);
+              syntheticBlobUrl.current = blobUrl;
+              startHls(blobUrl);
+              return;
             }
+
+            // All attempts failed
+            hls.destroy();
+            hlsRef.current = null;
+            setError('Não foi possível reproduzir este canal');
+            setIsLoading(false);
+            clearTimeoutOnSuccess();
           });
+
           hlsRef.current = hls;
         };
 
         startHls(hlsUrl);
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari native HLS
+        // Safari native HLS support
         video.src = hlsUrl;
-        video.addEventListener('loadedmetadata', () => { setIsLoading(false); clearTimeout(timeout); }, { once: true });
+        video.addEventListener('loadedmetadata', () => { setIsLoading(false); clearTimeoutOnSuccess(); }, { once: true });
         video.play().catch(() => {});
       } else {
-        // No HLS support at all
         setError('Seu navegador não suporta reprodução HLS');
         setIsLoading(false);
-        clearTimeout(timeout);
+        clearTimeoutOnSuccess();
       }
     } else {
-      // --- VOD path: direct playback ---
+      // ─── VOD path: direct playback (mp4, mkv, etc.) ───
       console.log('[VideoPlayer] Direct playback (VOD):', url);
       video.src = url;
-      video.addEventListener('loadedmetadata', () => { setIsLoading(false); clearTimeout(timeout); }, { once: true });
+      video.addEventListener('loadedmetadata', () => { setIsLoading(false); clearTimeoutOnSuccess(); }, { once: true });
       video.play().catch(() => {});
     }
 
@@ -173,7 +165,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
       clearTimeout(timeout);
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('waiting', onWaiting);
-      video.removeEventListener('error', onError);
+      video.removeEventListener('error', onVideoError);
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       if (syntheticBlobUrl.current) { URL.revokeObjectURL(syntheticBlobUrl.current); syntheticBlobUrl.current = null; }
     };
