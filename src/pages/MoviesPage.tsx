@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Film } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import InlinePlayer from '@/components/InlinePlayer';
 
 const MoviesPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
-  const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activeMovie, setActiveMovie] = useState<VodStream | null>(null);
+  const [activePlayer, setActivePlayer] = useState<{ url: string; title: string } | null>(null);
 
   const { data: categories = [] } = useQuery({
     queryKey: ['vod-categories', credentials?.host],
@@ -31,7 +31,7 @@ const MoviesPage: React.FC = () => {
     addToHistory({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
     if (credentials) {
       const url = xtreamApi.getVodStreamUrl(credentials, movie.stream_id, movie.container_extension || 'mp4');
-      navigate('/player', { state: { url, title: movie.name } });
+      setActivePlayer({ url, title: movie.name });
     }
   };
 
@@ -39,7 +39,14 @@ const MoviesPage: React.FC = () => {
     <div className="min-h-screen bg-background pb-20">
       <AppHeader title="Filmes" />
 
-      {/* Native player opens fullscreen — no embedded player needed */}
+      {/* Inline player */}
+      {activePlayer && (
+        <InlinePlayer
+          url={activePlayer.url}
+          title={activePlayer.title}
+          onClose={() => { setActivePlayer(null); setActiveMovie(null); }}
+        />
+      )}
 
       {/* Categories */}
       <div className="px-4 py-3 overflow-x-auto flex gap-2 no-scrollbar">
