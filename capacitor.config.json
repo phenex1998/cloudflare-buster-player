@@ -8,6 +8,7 @@
   },
   "server": {
     "url": "https://c4e021b3-28bd-442a-a81d-cccc0857c716.lovableproject.com?forceHideBadge=true",
-    "cleartext": true
+    "cleartext": true,
+    "allowNavigation": ["*"]
   }
 }
