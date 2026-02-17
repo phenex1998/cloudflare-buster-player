@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi } from '@/lib/xtream-api';
-import VideoPlayer from '@/components/VideoPlayer';
+import VideoPlayerModal from '@/components/VideoPlayerModal';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -49,11 +49,12 @@ const SeriesDetailPage: React.FC = () => {
         <h1 className="text-lg font-bold truncate text-foreground">{detail?.info?.name}</h1>
       </div>
 
-      {/* Player */}
+      {/* Modal player overlay */}
       {activeEpisode && credentials && (
-        <VideoPlayer
+        <VideoPlayerModal
           url={xtreamApi.getSeriesStreamUrl(credentials, activeEpisode.id, activeEpisode.ext)}
           title={activeEpisode.title}
+          onClose={() => setActiveEpisode(null)}
         />
       )}
 
