@@ -35,13 +35,29 @@ const PlayerPage: React.FC = () => {
 
     const streamUrl = state.url.trim();
     const resolvedUrl = resolveUrl(streamUrl);
-    console.log(`🎥 Player NATIVO ${isNative ? '(produção)' : '(preview com proxy)'}:`, resolvedUrl);
+
+    console.log("🎥 Player NATIVO iniciado - URL recebida:", streamUrl);
+    console.log("📱 Plataforma:", isNative ? "Android/iOS (direto)" : "Web (com proxy)");
+    console.log("🔗 URL resolvida:", resolvedUrl);
 
     video.src = resolvedUrl;
     video.load();
-    video.play().catch(err => console.warn("Auto-play bloqueado:", err));
+    video.muted = true;
+    console.log("✅ video.src definido e load() chamado");
+
+    const playPromise = video.play();
+    if (playPromise) {
+      playPromise.catch(err => console.error("❌ Auto-play falhou:", err));
+    }
+
+    const timeoutId = setTimeout(() => {
+      console.warn("⏰ Timeout de 8s - loading travado");
+      setLoading(false);
+      setError("Stream demorou muito para responder");
+    }, 8000);
 
     return () => {
+      clearTimeout(timeoutId);
       video.pause();
       video.src = '';
     };
@@ -82,19 +98,34 @@ const PlayerPage: React.FC = () => {
           ref={videoRef}
           className="w-full h-full bg-black object-contain rounded-2xl"
           playsInline
+          webkit-playsinline="true"
           muted
           autoPlay
           controls
           crossOrigin="anonymous"
-          onError={(e) => {
-            console.error("Video error:", e);
-            setLoading(false);
-            setError("Erro ao carregar o stream.");
-          }}
           onLoadedMetadata={() => {
-            console.log("✅ Metadata carregado - stream OK");
+            console.log("✅ onLoadedMetadata disparado");
             setLoading(false);
           }}
+          onCanPlay={() => {
+            console.log("✅ onCanPlay disparado - stream pronto");
+            setLoading(false);
+          }}
+          onPlaying={() => {
+            console.log("✅ onPlaying disparado - vídeo rodando!");
+            setLoading(false);
+          }}
+          onLoadedData={() => console.log("✅ onLoadedData")}
+          onWaiting={() => {
+            console.log("⏳ onWaiting - bufferizando");
+            setLoading(true);
+          }}
+          onError={(e) => {
+            console.error("❌ Video ERROR:", e);
+            setLoading(false);
+            setError("Erro ao carregar stream - verifique o console");
+          }}
+          onStalled={() => console.warn("⚠️ onStalled - stream parou")}
         />
 
         {error && (
