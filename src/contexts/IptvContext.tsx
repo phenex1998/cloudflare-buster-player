@@ -91,10 +91,19 @@ export function IptvProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
         return true;
       }
-      setError('Conta inativa ou expirada');
+      setError('Conta inativa ou expirada. Verifique com seu provedor.');
       return false;
-    } catch (e) {
-      setError('Falha na conexão. Verifique host, usuário e senha.');
+    } catch (e: any) {
+      const msg = e?.message || '';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        setError('Erro de rede. Verifique se o host está correto e acessível.');
+      } else if (msg.includes('401') || msg.includes('403')) {
+        setError('Usuário ou senha incorretos.');
+      } else if (msg.includes('404')) {
+        setError('Servidor não encontrado. Verifique a URL do host.');
+      } else {
+        setError(`Falha na conexão: ${msg}`);
+      }
       return false;
     } finally {
       setIsLoading(false);

@@ -68,4 +68,3 @@ Depois de implementar, voce precisara:
 1. Fazer `git pull` do projeto
 2. Rodar `npx cap sync`
 3. Rodar `npx cap run android`
-
