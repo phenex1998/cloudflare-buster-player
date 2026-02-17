@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { VideoPlayer } from '@capgo/capacitor-video-player';
+import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 
 interface PlayerState {
   url: string;
   title?: string;
 }
-
-const PLAYER_ID = 'iptvPlayer';
 
 const PlayerPage: React.FC = () => {
   const location = useLocation();
@@ -21,29 +19,38 @@ const PlayerPage: React.FC = () => {
     if (!state?.url) return;
 
     let cancelled = false;
+    const isNative = Capacitor.isNativePlatform();
 
     const startPlayer = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        await VideoPlayer.initPlayer({
-          mode: 'fullscreen',
-          url: state.url,
-          playerId: PLAYER_ID,
-          componentTag: 'div',
-          title: state.title || 'Stream',
-          exitOnEnd: true,
-          loopOnEnd: false,
-          showControls: true,
-          chromecast: false,
-          displayMode: 'landscape',
-        });
+        if (isNative) {
+          // Dynamically import the plugin only on native
+          const { VideoPlayer } = await import('@capgo/capacitor-video-player');
 
-        if (!cancelled) {
+          await VideoPlayer.initPlayer({
+            mode: 'fullscreen',
+            url: state.url,
+            playerId: 'fullscreen',
+            componentTag: 'app-root',
+            title: state.title || 'Stream',
+            exitOnEnd: true,
+            loopOnEnd: false,
+            showControls: true,
+            chromecast: false,
+            displayMode: 'landscape',
+          });
+
+          // initPlayer resolves when the native player closes
+          if (!cancelled) {
+            navigate(-1);
+          }
+        } else {
+          // Web preview fallback: open URL directly (won't work for IPTV but avoids crash)
           setLoading(false);
-          // Player closed (exitOnEnd), go back
-          navigate(-1);
+          setError('O player nativo só funciona no app Android. Use o APK instalado no dispositivo.');
         }
       } catch (err: any) {
         console.error('Native player error:', err);
@@ -58,7 +65,11 @@ const PlayerPage: React.FC = () => {
 
     return () => {
       cancelled = true;
-      VideoPlayer.stopAllPlayers().catch(() => {});
+      if (isNative) {
+        import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
+          VideoPlayer.stopAllPlayers().catch(() => {});
+        }).catch(() => {});
+      }
     };
   }, [state?.url]);
 
@@ -72,7 +83,6 @@ const PlayerPage: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      {/* Fallback UI while native player loads or on error */}
       <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}
@@ -91,7 +101,7 @@ const PlayerPage: React.FC = () => {
         </div>
       )}
 
-      {/* Container required by the plugin */}
+      {/* Container for native plugin */}
       <div id="fullscreen" className="flex-1" />
 
       {error && (
