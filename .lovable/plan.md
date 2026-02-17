@@ -1,102 +1,105 @@
 
 
-# Correcao Definitiva do Player Inline
+# Correcao Definitiva: Usar mpegts.js para Streams .ts Inline
 
-## Causa Raiz Identificada
+## Problema
 
-O HLS.js **nao consegue reproduzir arquivos `.ts` diretos**. Ele precisa de um arquivo `.m3u8` (playlist HLS) que contenha o manifesto dos segmentos de video. A URL atual gera algo como `/live/user/pass/12345.ts` -- um stream MPEG-TS bruto que o HLS.js nao sabe interpretar.
-
-A API Xtream Codes suporta ambas as extensoes:
-- `.ts` -- stream MPEG-TS direto (funciona apenas com players nativos como ExoPlayer)
-- `.m3u8` -- playlist HLS (funciona com HLS.js no browser/WebView)
-
-Alem disso, no ambiente de preview Web (Lovable), o navegador bloqueia requisicoes diretas ao servidor IPTV por CORS. A edge function de proxy (`iptv-proxy`) ja existe mas nao esta sendo usada pelo player.
+- A extensao `.m3u8` foi forçada mas a maioria dos servidores IPTV so serve `.ts` para canais ao vivo
+- HLS.js **nao consegue** reproduzir arquivos `.ts` diretos (precisa de manifesto `.m3u8`)
+- Tanto o inline quanto o fullscreen quebraram
 
 ## Solucao
 
-### 1. `src/pages/LiveTvSplitPage.tsx` -- Mudar extensao para `.m3u8`
+Substituir HLS.js por **mpegts.js** -- uma biblioteca feita especificamente para reproduzir streams MPEG2-TS (`.ts`) direto no browser via Media Source Extensions. Funciona no Chrome, WebView Android, e navegadores modernos.
 
-Alterar a linha que gera a URL do stream:
-- **Antes**: `xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id, 'ts')`
-- **Depois**: `xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id, 'm3u8')`
+## Mudancas
 
-Isso faz com que a API Xtream retorne uma playlist HLS que o HLS.js consegue consumir.
+### 1. Instalar mpegts.js
 
-### 2. `src/components/InlinePlayer.tsx` -- Adicionar suporte ao proxy para Web
+Adicionar `mpegts.js` como dependencia do projeto (npm package: `mpegts.js`).
 
-O componente precisa detectar o ambiente e rotear a URL adequadamente:
+### 2. `src/pages/LiveTvSplitPage.tsx` -- Reverter para `.ts`
 
-**Em ambiente Web (preview Lovable/browser)**:
-- Rotear a URL do stream atraves da edge function `iptv-proxy` para contornar CORS
-- URL proxy: `https://<supabase-url>/functions/v1/iptv-proxy?url=<stream-url-encoded>`
-- Configurar HLS.js com `xhrSetup` customizado para que **todas** as sub-requisicoes (segmentos `.ts`, sub-playlists) tambem passem pelo proxy
+Linha 39: Mudar de `'m3u8'` de volta para `'ts'`.
 
-**Em ambiente nativo (Android WebView)**:
-- Usar URL direta sem proxy (WebView nao tem restricoes de CORS)
+### 3. `src/components/InlinePlayer.tsx` -- Reescrever com mpegts.js
 
-**Logica HLS.js atualizada**:
-```text
-1. URL chega como prop
-2. Detectar ambiente (nativo vs web)
-3. Se web: envolver URL no proxy
-4. Criar instancia HLS com xhrSetup customizado (para proxy das sub-requisicoes)
-5. hls.loadSource(url)
-6. hls.attachMedia(video)
-7. MANIFEST_PARSED -> video.play()
-8. Fallback em caso de erro fatal: tentar src direto
-```
+Substituir toda a logica HLS.js por mpegts.js:
 
-**xhrSetup para proxy** (apenas no Web):
-- Intercepta cada requisicao XHR do HLS.js
-- Reescreve a URL para passar pelo proxy
-- Garante que segmentos `.ts` carregados pelo player tambem nao sejam bloqueados por CORS
+**Playback inline:**
+- Criar instancia `mpegts.MediaPlayer` com `type: 'mpegts'` e `isLive: true`
+- Carregar a URL `.ts` diretamente
+- No Web: rotear pelo proxy (`iptv-proxy`) para contornar CORS
+- No Android nativo: usar URL direta (sem CORS no WebView)
+- Antes de trocar de canal: destruir player anterior (`player.destroy()`)
 
-### 3. Botao Expandir (fullscreen nativo)
-
-Manter logica atual:
-- Android nativo: usar plugin Capacitor com `mode: 'fullscreen'` e URL `.ts` (ExoPlayer prefere `.ts`)
+**Fullscreen:**
+- Android nativo: usar `@capgo/capacitor-video-player` com `mode: 'fullscreen'` e URL `.ts` direta
 - Web: usar `requestFullscreen()` no elemento video
 
-### 4. Filmes e Series (`MoviesSplitPage`, `SeriesSplitPage`)
-
-Aplicar a mesma logica de proxy no `InlinePlayer` -- como o componente e compartilhado, a correcao beneficia automaticamente todas as paginas de split view. Nao e necessario mudar extensao nesses casos pois filmes/series ja usam suas extensoes originais (`.mp4`, `.mkv`, etc.).
-
-## Arquivos Modificados
-
-1. **`src/pages/LiveTvSplitPage.tsx`** -- Mudar `'ts'` para `'m3u8'` na geracao da URL (1 linha)
-2. **`src/components/InlinePlayer.tsx`** -- Adicionar deteccao de ambiente + proxy para Web + xhrSetup no HLS.js
-
-## Resultado Esperado
-
-- **Android (APK)**: HLS.js carrega o `.m3u8` direto do servidor IPTV no WebView, video toca inline na coluna da direita
-- **Web (preview Lovable)**: HLS.js carrega o `.m3u8` via proxy, contornando CORS, video toca inline
-- Trocar de canal destroi a instancia HLS anterior e cria nova sem sobreposicao
-- Botao Expandir funciona com fullscreen nativo no Android
+**Fluxo ao trocar de canal:**
+```text
+1. Usuario clica no canal
+2. URL muda -> useEffect dispara
+3. Se existe player anterior -> player.destroy()
+4. Cria novo mpegts.MediaPlayer({ type: 'mpegts', isLive: true })
+5. player.attachMediaElement(videoElement)
+6. player.load() -- video comeca a tocar
+7. Video aparece inline na coluna da direita
+```
 
 ## Detalhes Tecnicos
 
-### Proxy URL helper
+### mpegts.js -- inicializacao
+
 ```text
-function getProxiedUrl(url: string, isNative: boolean): string {
-  if (isNative) return url; // WebView nao tem CORS
+import mpegts from 'mpegts.js';
+
+if (mpegts.isSupported()) {
+  const player = mpegts.createPlayer({
+    type: 'mpegts',
+    isLive: true,
+    url: proxiedOrDirectUrl,
+  }, {
+    enableWorker: true,
+    liveBufferLatencyChasing: true,
+    liveSync: true,
+  });
+  player.attachMediaElement(videoElement);
+  player.load();
+  player.play();
+}
+```
+
+### Proxy (apenas Web)
+
+```text
+function getProxiedUrl(url: string): string {
+  if (isAndroid()) return url;
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   return `${supabaseUrl}/functions/v1/iptv-proxy?url=${encodeURIComponent(url)}`;
 }
 ```
 
-### HLS.js xhrSetup (para proxy no Web)
+### Fullscreen nativo
+
 ```text
-new Hls({
-  enableWorker: true,
-  lowLatencyMode: true,
-  xhrSetup: (xhr, url) => {
-    if (!isNative) {
-      const proxied = getProxiedUrl(url, false);
-      xhr.open('GET', proxied, true);
-    }
-  }
-})
+// Android: plugin Capacitor com URL .ts direta
+VideoPlayer.initPlayer({ mode: 'fullscreen', url: cleanUrl, ... });
+// Web: requestFullscreen()
+videoRef.current.requestFullscreen();
 ```
 
-Isso garante que tanto o manifesto `.m3u8` quanto os segmentos `.ts` referenciados dentro dele passem pelo proxy.
+## Arquivos Modificados
+
+1. `package.json` -- adicionar dependencia `mpegts.js`
+2. `src/pages/LiveTvSplitPage.tsx` -- reverter extensao para `'ts'` (1 linha)
+3. `src/components/InlinePlayer.tsx` -- reescrever: remover HLS.js, usar mpegts.js
+
+## Resultado Esperado
+
+- Streams `.ts` reproduzem inline na coluna da direita (Android APK e Web)
+- Trocar de canal destroi o player anterior sem sobreposicao de audio
+- Botao Expandir funciona: fullscreen nativo no Android, requestFullscreen no Web
+- Filmes e Series continuam funcionando (usam extensoes proprias como `.mp4`)
 
