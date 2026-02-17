@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Hls from 'hls.js';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -17,30 +17,76 @@ const PlayerPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const state = location.state as PlayerState | undefined;
 
+  const tryDirectSrc = useCallback((video: HTMLVideoElement, url: string) => {
+    console.log('[Player] Fallback: direct video.src =', url);
+    video.src = url;
+    video.load();
+    video.play().catch(() => {});
+  }, []);
+
+  const tryTsFallback = useCallback((video: HTMLVideoElement, url: string) => {
+    // Replace .m3u8 with .ts as last resort
+    const tsUrl = url.replace(/\.m3u8(\?.*)?$/, '.ts$1');
+    if (tsUrl !== url) {
+      console.log('[Player] Fallback: trying .ts URL =', tsUrl);
+      video.src = tsUrl;
+      video.load();
+      video.play().catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !state?.url) return;
 
     const url = state.url.trim();
     const isHls = url.includes('.m3u8');
+    let fallbackAttempted = false;
+
+    console.log('[Player] Loading URL:', url, '| isHLS:', isHls);
 
     setLoading(true);
     setError(null);
 
-    const onCanPlay = () => setLoading(false);
+    const onCanPlay = () => {
+      console.log('[Player] canplay event fired');
+      setLoading(false);
+    };
+
+    const onVideoError = () => {
+      console.log('[Player] video error event, fallbackAttempted:', fallbackAttempted);
+      if (!fallbackAttempted && isHls) {
+        fallbackAttempted = true;
+        tryTsFallback(video, url);
+        return;
+      }
+      setError('Erro ao reproduzir o vídeo.');
+      setLoading(false);
+    };
+
     video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('error', onVideoError);
 
     if (isHls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+      const hls = new Hls({
+        enableWorker: true,
+        xhrSetup: (xhr) => {
+          xhr.timeout = 15000;
+        },
+      });
       hlsRef.current = hls;
 
       hls.on(Hls.Events.ERROR, (_e, data) => {
+        console.log('[Player] hls.js error:', data.type, data.details, data.fatal);
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             hls.recoverMediaError();
           } else {
-            setError('Erro ao carregar o stream.');
-            setLoading(false);
+            // hls.js failed — try native playback as fallback
+            console.log('[Player] hls.js fatal error, trying direct src fallback');
+            hls.destroy();
+            hlsRef.current = null;
+            tryDirectSrc(video, url);
           }
         }
       });
@@ -48,25 +94,24 @@ const PlayerPage: React.FC = () => {
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log('[Player] HLS manifest parsed, starting playback');
         video.play().catch(() => {});
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS (Safari / iOS)
+    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari / some Android WebViews)
+      console.log('[Player] Using native HLS support');
       video.src = url;
       video.play().catch(() => {});
     } else {
-      // Direct file (mp4, ts, mkv)
+      // Direct file (mp4, ts, mkv) or no HLS support
+      console.log('[Player] Direct src playback');
       video.src = url;
       video.play().catch(() => {});
     }
 
-    video.addEventListener('error', () => {
-      setError('Erro ao reproduzir o vídeo.');
-      setLoading(false);
-    });
-
     return () => {
       video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('error', onVideoError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -75,7 +120,7 @@ const PlayerPage: React.FC = () => {
       video.removeAttribute('src');
       video.load();
     };
-  }, [state?.url]);
+  }, [state?.url, tryDirectSrc, tryTsFallback]);
 
   if (!state?.url) {
     return (
