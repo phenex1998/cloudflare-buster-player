@@ -1,105 +1,104 @@
 
 
-# Corrigir reproducao de canais ao vivo (Web + Android)
+# Foco Android: ExoPlayer via Intent (estilo XCIPTV)
 
-## Problema
+## O que muda
 
-Quando o usuario clica em um canal, nada acontece e nenhum erro aparece. Isso tem duas causas:
+Remover toda logica de web player (HlsPlayer), proxy e formatacao de URL. O app passa a funcionar exclusivamente como um app Android que abre streams diretamente no ExoPlayer (VLC, MX Player, Just Player, etc.) via Intent -- exatamente como o XCIPTV faz.
 
-**Na Web/Preview:** O HlsPlayer recebe uma URL direta do servidor IPTV (ex: `http://servidor/live/user/pass/123.m3u8`). O hls.js tenta buscar essa URL via XHR, mas como o app roda em HTTPS e o servidor IPTV e HTTP, o navegador bloqueia por "mixed content" e CORS. Resultado: loading infinito.
+## Arquivos a remover
 
-**No Android:** O intent:// pode ser bloqueado silenciosamente pelo WebView, e nao ha fallback visivel para o usuario.
-
-## Solucao
-
-### 1. Atualizar o proxy para suportar GET (streaming)
-
-O proxy atual so aceita POST. Para que o hls.js possa buscar manifestos e segmentos de video atraves dele, precisa aceitar GET com a URL como parametro de query:
-
-```
-GET /functions/v1/iptv-proxy?url=http://host/live/user/pass/123.m3u8
-```
-
-Tambem precisa retornar o Content-Type correto do servidor original (nao forcar `application/json`).
-
-### 2. Rotear o HlsPlayer pelo proxy na web
-
-Usar a opcao `xhrSetup` do hls.js para interceptar TODAS as requisicoes (manifesto .m3u8 + segmentos .ts) e redirecioná-las pelo proxy. Isso resolve CORS e mixed content de uma vez:
-
-```
-hls.js quer buscar: http://host/live/user/pass/123.m3u8
-xhrSetup intercepta e troca para: https://proxy/iptv-proxy?url=http%3A%2F%2Fhost%2F...
-Proxy busca o conteudo e retorna ao hls.js
-```
-
-### 3. Melhorar o fluxo Android com dupla opcao
-
-No Android, ao clicar no canal:
-- Tentar abrir no player externo via intent (VLC/MX Player)  
-- Mostrar tambem o HlsPlayer inline como alternativa (com URL direta, que funciona no WebView com allowMixedContent)
-- Botao visivel "Abrir em player externo" caso o intent falhe silenciosamente
+- `src/components/HlsPlayer.tsx` -- player web nao sera mais usado
+- `src/components/VideoPlayer.tsx` -- player alternativo nao necessario
 
 ## Arquivos a modificar
 
-| Arquivo | Mudanca |
-|---------|---------|
-| `supabase/functions/iptv-proxy/index.ts` | Adicionar suporte GET com `?url=` e retornar Content-Type original |
-| `src/components/HlsPlayer.tsx` | Adicionar logica de proxy no `xhrSetup` do hls.js para rotear todas as requisicoes pela edge function quando na web |
-| `src/pages/LiveTvPage.tsx` | No Android: mostrar player inline + botao de player externo. Na web: passar flag para HlsPlayer usar proxy |
-| `src/lib/xtream-api.ts` | Atualizar `isNative()` para usar userAgent (consistente com native-player.ts) |
+### 1. `src/lib/native-player.ts`
+Simplificar para uma unica funcao `playStream()` que:
+- Monta a URL `.ts` direta (sem proxy, sem `.m3u8`)
+- Abre via Intent Android com `type=video/*` para ExoPlayer/VLC/MX Player
+- Fallback: `window.open(url, '_system')`
+
+### 2. `src/lib/xtream-api.ts`
+- Remover funcao `isNative()` e toda logica de proxy
+- `fetchApi()` passa a fazer fetch direto (sem proxy) -- o app roda no WebView Android que nao tem CORS
+- Remover referencias ao edge function proxy
+
+### 3. `src/pages/LiveTvPage.tsx`
+- Remover import do HlsPlayer
+- Remover estado `activeStream` e toda logica de player inline
+- `handlePlay()` simplesmente monta a URL `.ts` e chama `playStream()`
+- A lista de canais ocupa a tela toda (sem area de player embutido)
+
+### 4. `src/pages/MoviesPage.tsx`
+- Sem mudancas significativas -- ja usa `playStream()` corretamente
+
+### 5. `src/pages/SeriesDetailPage.tsx`
+- Sem mudancas significativas -- ja usa `playStream()` corretamente
+
+### 6. `supabase/functions/iptv-proxy/index.ts`
+- Manter o arquivo mas ele nao sera mais chamado pelo app (pode ser removido futuramente)
+
+## Logica do playStream (estilo XCIPTV)
+
+O XCIPTV usa ExoPlayer internamente, mas quando apps externos precisam reproduzir, ele usa Intents Android. A logica sera:
+
+```text
+playStream(url, title):
+  1. Montar Intent URI:
+     intent://URL_SEM_SCHEME#Intent;scheme=http;type=video/*;S.title=TITULO;end
+  
+  2. Tentar window.location.href = intentUrl
+  
+  3. Se falhar, tentar window.open(url, '_system')
+  
+  4. Ultimo recurso: window.location.href = url
+```
+
+A URL do stream sera sempre `.ts` para canais ao vivo:
+```text
+http://host/live/username/password/stream_id.ts
+```
+
+## Fluxo final
+
+```text
+Usuario clica no canal
+  -> addToHistory()
+  -> getLiveStreamUrl(credentials, stream_id, 'ts')
+     = "http://host/live/user/pass/123.ts"
+  -> playStream(url, channelName)
+     = intent://host/live/user/pass/123.ts#Intent;scheme=http;type=video/*;end
+  -> Android abre seletor de apps (VLC, MX Player, Just Player, etc.)
+  -> ExoPlayer reproduz o stream .ts diretamente
+```
 
 ## Detalhes tecnicos
 
-### Proxy (edge function) - suporte GET
+### xtream-api.ts - fetchApi simplificado
 
 ```text
-GET ?url=encoded_url  ->  fetch(url) -> retorna body com Content-Type original
-POST {url}            ->  funciona como antes (retrocompativel)
+// Remover toda logica de proxy
+// Fetch direto -- WebView Android nao tem restricao CORS
+async function fetchApi<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
 ```
 
-O proxy passa o Content-Type original do servidor IPTV em vez de forcar `application/json`. Isso e necessario porque:
-- .m3u8 retorna `application/vnd.apple.mpegurl` ou `text/plain`
-- .ts retorna `video/mp2t`
-
-### HlsPlayer - proxy via xhrSetup
+### LiveTvPage.tsx - sem player inline
 
 ```text
-Na web (nao-nativo):
-  hls.js config.xhrSetup = (xhr, url) => {
-    proxyUrl = PROXY_BASE + "?url=" + encodeURIComponent(url)
-    xhr.open("GET", proxyUrl, true)
-    xhr.setRequestHeader("apikey", ANON_KEY)
-  }
+// Remover: import HlsPlayer
+// Remover: useState activeStream
+// Remover: bloco do player embutido (sticky top)
+// Remover: bloco do EpgSection dentro do player
 
-No Android (nativo):
-  Sem proxy - URLs diretas funcionam no WebView
+handlePlay(stream):
+  addToHistory(...)
+  const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts')
+  playStream(url, stream.name)
 ```
 
-### LiveTvPage - fluxo Android melhorado
-
-```text
-Android:
-  Click canal ->
-    1. Abre HlsPlayer inline com URL .m3u8 direta (sem proxy)
-    2. Mostra botao "Abrir em VLC/MX Player" que dispara playStream()
-    3. Se HlsPlayer falhar, mostra erro com botao para player externo
-
-Web:
-  Click canal ->
-    1. Abre HlsPlayer inline com URL .m3u8 (proxy via xhrSetup)
-    2. Botao "Player Externo" disponivel nos controles
-```
-
-### isNative() em xtream-api.ts
-
-Trocar `(window as any).Capacitor` por deteccao via userAgent para consistencia:
-```text
-isNative() = isAndroid() || isIOS()  // via navigator.userAgent
-```
-
-## Resultado esperado
-
-- **Na web**: canais carregam e reproduzem via HlsPlayer, com todas as requisicoes passando pelo proxy (sem CORS, sem mixed content)
-- **No Android**: canais reproduzem inline no HlsPlayer (URL direta funciona no WebView) com opcao de abrir em player externo
-- **Sem erros silenciosos**: qualquer falha mostra mensagem com opcao de retry ou player externo
-
+A pagina mostra apenas a barra de busca + grid de canais, sem nenhum player embutido. Ao clicar, abre direto no player externo do Android.
