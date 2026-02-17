@@ -5,5 +5,9 @@
   "androidScheme": "http",
   "android": {
     "allowMixedContent": true
+  },
+  "server": {
+    "allowNavigation": ["*"],
+    "cleartext": true
   }
 }

@@ -27,20 +27,22 @@ const PlayerPage: React.FC = () => {
         setError(null);
 
         if (isNative) {
-          // Dynamically import the plugin only on native
+          const cleanUrl = state.url.trim();
+          console.log('[Player] URL:', cleanUrl);
+
           const { VideoPlayer } = await import('@capgo/capacitor-video-player');
 
           await VideoPlayer.initPlayer({
             mode: 'fullscreen',
-            url: state.url,
-            playerId: 'fullscreen',
-            componentTag: 'app-root',
+            url: cleanUrl,
+            playerId: 'iptvPlayer',
+            componentTag: 'div',
             title: state.title || 'Stream',
             exitOnEnd: true,
             loopOnEnd: false,
             showControls: true,
-            chromecast: false,
             displayMode: 'landscape',
+            chromecast: false,
           });
 
           // initPlayer resolves when the native player closes
