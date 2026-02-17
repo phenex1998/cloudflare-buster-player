@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi } from '@/lib/xtream-api';
-import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -28,10 +27,8 @@ const SeriesDetailPage: React.FC = () => {
     setActiveEpisode({ id: ep.id, ext: ep.container_extension, title: ep.title });
     addToHistory({ id: ep.id, type: 'series', name: `${detail?.info?.name} - ${ep.title}` });
     if (credentials) {
-      playStream(
-        xtreamApi.getSeriesStreamUrl(credentials!, ep.id, ep.container_extension),
-        ep.title
-      );
+      const url = xtreamApi.getSeriesStreamUrl(credentials!, ep.id, ep.container_extension);
+      navigate('/player', { state: { url, title: ep.title } });
     }
   };
 
