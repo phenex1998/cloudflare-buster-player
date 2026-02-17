@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
-import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Film } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MoviesPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
+  const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activeMovie, setActiveMovie] = useState<VodStream | null>(null);
 
@@ -29,10 +30,8 @@ const MoviesPage: React.FC = () => {
     setActiveMovie(movie);
     addToHistory({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
     if (credentials) {
-      playStream(
-        xtreamApi.getVodStreamUrl(credentials, movie.stream_id, movie.container_extension || 'mp4'),
-        movie.name
-      );
+      const url = xtreamApi.getVodStreamUrl(credentials, movie.stream_id, movie.container_extension || 'mp4');
+      navigate('/player', { state: { url, title: movie.name } });
     }
   };
 

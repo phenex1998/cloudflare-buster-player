@@ -12,6 +12,7 @@ import SeriesDetailPage from "@/pages/SeriesDetailPage";
 import EpgPage from "@/pages/EpgPage";
 import FavoritesPage from "@/pages/FavoritesPage";
 import SearchPage from "@/pages/SearchPage";
+import PlayerPage from "@/pages/PlayerPage";
 import BottomNav from "@/components/BottomNav";
 import NotFound from "./pages/NotFound";
 import { useEffect } from "react";
@@ -52,6 +53,7 @@ function AuthenticatedRoutes() {
         <Route path="/epg" element={<EpgPage />} />
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/player" element={<PlayerPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <BottomNav />

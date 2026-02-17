@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
-import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Heart, Radio, Search, X } from 'lucide-react';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 
 const LiveTvPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
 
   const { data: categories = [] } = useQuery({
@@ -51,8 +52,8 @@ const LiveTvPage: React.FC = () => {
   const handlePlay = (stream: LiveStream) => {
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
     if (credentials) {
-      const tsUrl = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
-      playStream(tsUrl, stream.name);
+      const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+      navigate('/player', { state: { url, title: stream.name } });
     }
   };
 
