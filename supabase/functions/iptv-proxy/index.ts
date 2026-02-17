@@ -11,21 +11,33 @@ serve(async (req) => {
   }
 
   try {
-    const { url } = await req.json();
+    let targetUrl: string | null = null;
 
-    if (!url) {
+    if (req.method === 'GET') {
+      const params = new URL(req.url).searchParams;
+      targetUrl = params.get('url');
+    } else {
+      const body = await req.json();
+      targetUrl = body.url;
+    }
+
+    if (!targetUrl) {
       return new Response(
         JSON.stringify({ error: 'Missing url parameter' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const response = await fetch(url);
-    const data = await response.text();
+    const response = await fetch(targetUrl);
+    const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+    const body = await response.arrayBuffer();
 
-    return new Response(data, {
+    return new Response(body, {
       status: response.status,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: {
+        ...corsHeaders,
+        'Content-Type': contentType,
+      },
     });
   } catch (error) {
     return new Response(
