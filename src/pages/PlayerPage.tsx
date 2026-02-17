@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
+import Hls from 'hls.js';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 
 interface PlayerState {
@@ -11,67 +11,69 @@ interface PlayerState {
 const PlayerPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const state = location.state as PlayerState | undefined;
 
   useEffect(() => {
-    if (!state?.url) return;
+    const video = videoRef.current;
+    if (!video || !state?.url) return;
 
-    let cancelled = false;
-    const isNative = Capacitor.isNativePlatform();
+    const url = state.url.trim();
+    const isHls = url.includes('.m3u8');
 
-    const startPlayer = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+    setLoading(true);
+    setError(null);
 
-        if (isNative) {
-          const cleanUrl = state.url.trim();
-          console.log('[Player] URL:', cleanUrl);
+    const onCanPlay = () => setLoading(false);
+    video.addEventListener('canplay', onCanPlay);
 
-          const { VideoPlayer } = await import('@capgo/capacitor-video-player');
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true });
+      hlsRef.current = hls;
 
-          await VideoPlayer.initPlayer({
-            mode: 'fullscreen',
-            url: cleanUrl,
-            playerId: 'iptvPlayer',
-            componentTag: 'div',
-            title: state.title || 'Stream',
-            exitOnEnd: true,
-            loopOnEnd: false,
-            showControls: true,
-            displayMode: 'landscape',
-            chromecast: false,
-          });
-
-          // initPlayer resolves when the native player closes
-          if (!cancelled) {
-            navigate(-1);
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) {
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          } else {
+            setError('Erro ao carregar o stream.');
+            setLoading(false);
           }
-        } else {
-          // Web preview fallback: open URL directly (won't work for IPTV but avoids crash)
-          setLoading(false);
-          setError('O player nativo só funciona no app Android. Use o APK instalado no dispositivo.');
         }
-      } catch (err: any) {
-        console.error('Native player error:', err);
-        if (!cancelled) {
-          setLoading(false);
-          setError(err?.message || 'Erro ao iniciar o player nativo.');
-        }
-      }
-    };
+      });
 
-    startPlayer();
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {});
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS (Safari / iOS)
+      video.src = url;
+      video.play().catch(() => {});
+    } else {
+      // Direct file (mp4, ts, mkv)
+      video.src = url;
+      video.play().catch(() => {});
+    }
+
+    video.addEventListener('error', () => {
+      setError('Erro ao reproduzir o vídeo.');
+      setLoading(false);
+    });
 
     return () => {
-      cancelled = true;
-      if (isNative) {
-        import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-          VideoPlayer.stopAllPlayers().catch(() => {});
-        }).catch(() => {});
+      video.removeEventListener('canplay', onCanPlay);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
     };
   }, [state?.url]);
 
@@ -84,42 +86,41 @@ const PlayerPage: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center gap-3">
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-card border-b border-border">
         <button
           onClick={() => navigate(-1)}
-          className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+          className="p-2 rounded-full hover:bg-accent transition-colors"
         >
-          <ArrowLeft className="w-5 h-5 text-white" />
+          <ArrowLeft className="w-5 h-5 text-foreground" />
         </button>
         {state.title && (
-          <h1 className="text-white text-sm font-medium truncate">{state.title}</h1>
+          <h1 className="text-foreground text-sm font-medium truncate">{state.title}</h1>
         )}
       </div>
 
-      {loading && !error && (
-        <div className="flex-1 flex items-center justify-center">
-          <Loader2 className="w-10 h-10 text-white animate-spin" />
-        </div>
-      )}
+      {/* Video container */}
+      <div className="relative w-full bg-black" style={{ height: '35vh' }}>
+        <video
+          ref={videoRef}
+          className="w-full h-full object-contain"
+          controls
+          playsInline
+          // @ts-ignore
+          webkit-playsinline=""
+          autoPlay
+        />
 
-      {/* Container for native plugin */}
-      <div id="fullscreen" className="flex-1" />
+        {loading && !error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <Loader2 className="w-8 h-8 text-white animate-spin" />
+          </div>
+        )}
 
-      {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-4">
-          <p className="text-white/70 text-sm text-center px-8">{error}</p>
-          <div className="flex gap-3">
-            <button
-              onClick={() => {
-                setError(null);
-                setLoading(true);
-                window.location.reload();
-              }}
-              className="px-4 py-2 rounded-lg bg-white/10 text-white text-sm font-medium"
-            >
-              Tentar novamente
-            </button>
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 gap-3">
+            <p className="text-white/70 text-sm text-center px-6">{error}</p>
             <button
               onClick={() => navigate(-1)}
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium"
@@ -127,8 +128,8 @@ const PlayerPage: React.FC = () => {
               Voltar
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
