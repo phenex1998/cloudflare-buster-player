@@ -36,7 +36,7 @@ const LiveTvSplitPage: React.FC = () => {
   };
 
   const streamUrl = activeStream && credentials
-    ? xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id, 'ts')
+    ? xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id, 'm3u8')
     : null;
 
   return (

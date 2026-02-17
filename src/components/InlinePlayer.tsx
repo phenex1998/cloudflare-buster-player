@@ -13,18 +13,24 @@ interface InlinePlayerProps {
   streamIcon?: string;
 }
 
+const native = isAndroid();
+
+function getProxiedUrl(url: string): string {
+  if (native) return url;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  return `${supabaseUrl}/functions/v1/iptv-proxy?url=${encodeURIComponent(url)}`;
+}
+
 const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, streamType = 'live', streamIcon }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const { toggleFavorite, isFavorite } = useIptv();
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
-  const native = isAndroid();
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    // Cleanup previous HLS instance
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -39,15 +45,21 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
 
     const cleanUrl = url.trim();
     setCurrentUrl(cleanUrl);
-    console.log('[InlinePlayer] Loading via HLS.js:', cleanUrl);
+
+    const playUrl = getProxiedUrl(cleanUrl);
+    console.log('[InlinePlayer] Loading:', cleanUrl, native ? '(direct)' : '(proxied)');
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
+        xhrSetup: native ? undefined : (xhr, reqUrl) => {
+          const proxied = getProxiedUrl(reqUrl);
+          xhr.open('GET', proxied, true);
+        },
       });
       hlsRef.current = hls;
-      hls.loadSource(cleanUrl);
+      hls.loadSource(native ? cleanUrl : playUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
@@ -55,23 +67,20 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
       hls.on(Hls.Events.ERROR, (_event, data) => {
         console.warn('[InlinePlayer] HLS error:', data.type, data.details);
         if (data.fatal) {
-          // Fallback: try direct src
           console.log('[InlinePlayer] Fatal HLS error, trying direct src');
           hls.destroy();
           hlsRef.current = null;
-          video.src = cleanUrl;
+          video.src = playUrl;
           video.load();
           video.play().catch(() => {});
         }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // iOS Safari native HLS
-      video.src = cleanUrl;
+      video.src = playUrl;
       video.load();
       video.play().catch(() => {});
     } else {
-      // Direct fallback
-      video.src = cleanUrl;
+      video.src = playUrl;
       video.load();
       video.play().catch(() => {});
     }
