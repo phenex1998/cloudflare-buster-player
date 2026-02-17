@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import Hls from 'hls.js';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 
 interface PlayerState {
@@ -24,10 +23,8 @@ const PlayerPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
   const state = location.state as PlayerState | undefined;
 
-  // Sempre inline — HLS.js em ambos os ambientes
   useEffect(() => {
     if (!state?.url) return;
     const video = videoRef.current;
@@ -37,65 +34,16 @@ const PlayerPage: React.FC = () => {
     setError(null);
 
     const streamUrl = state.url.trim();
-    const useProxy = !isNative;
-    console.log(`🎥 Carregando ${useProxy ? 'via PROXY (preview)' : 'DIRETO (produção)'}:`, streamUrl);
+    const resolvedUrl = resolveUrl(streamUrl);
+    console.log(`🎥 Player NATIVO ${isNative ? '(produção)' : '(preview com proxy)'}:`, resolvedUrl);
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        ...(useProxy
-          ? {
-              xhrSetup: (xhr: XMLHttpRequest, url: string) => {
-                xhr.open('GET', resolveUrl(url), true);
-              },
-            }
-          : {}),
-      });
-
-      hlsRef.current = hls;
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setLoading(false);
-        video.play().catch(() => {});
-      });
-
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        console.error('❌ HLS ERROR:', data.type, data.details, data);
-        if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            console.warn('🔄 Tentando novamente em 2s...');
-            setTimeout(() => {
-              hls.loadSource(resolveUrl(streamUrl));
-            }, 2000);
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            console.warn('🔄 Recuperando erro de mídia...');
-            hls.recoverMediaError();
-          } else {
-            setLoading(false);
-            setError('Erro fatal no stream. Verifique a URL.');
-            hls.destroy();
-          }
-        }
-      });
-
-      hls.loadSource(resolveUrl(streamUrl));
-      hls.attachMedia(video);
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari native HLS
-      video.src = resolveUrl(streamUrl);
-      video.addEventListener('loadedmetadata', () => {
-        setLoading(false);
-        video.play().catch(() => {});
-      });
-    } else {
-      setLoading(false);
-      setError('Seu navegador não suporta reprodução HLS.');
-    }
+    video.src = resolvedUrl;
+    video.load();
+    video.play().catch(err => console.warn("Auto-play bloqueado:", err));
 
     return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      video.pause();
+      video.src = '';
     };
   }, [state?.url]);
 
@@ -132,13 +80,21 @@ const PlayerPage: React.FC = () => {
 
         <video
           ref={videoRef}
-          className="w-full h-full bg-black object-contain rounded-xl"
+          className="w-full h-full bg-black object-contain rounded-2xl"
           playsInline
           muted
           autoPlay
           controls
           crossOrigin="anonymous"
-          onLoadedMetadata={() => console.log('✅ Video metadata carregado')}
+          onError={(e) => {
+            console.error("Video error:", e);
+            setLoading(false);
+            setError("Erro ao carregar o stream.");
+          }}
+          onLoadedMetadata={() => {
+            console.log("✅ Metadata carregado - stream OK");
+            setLoading(false);
+          }}
         />
 
         {error && (
