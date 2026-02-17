@@ -1,13 +1,12 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Tv, Film, MonitorPlay, CalendarDays, Heart } from 'lucide-react';
+import { Tv, Film, MonitorPlay, Heart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const tabs = [
-  { path: '/live', label: 'TV ao Vivo', icon: Tv },
+  { path: '/live', label: 'Live', icon: Tv },
   { path: '/movies', label: 'Filmes', icon: Film },
   { path: '/series', label: 'Séries', icon: MonitorPlay },
-  { path: '/epg', label: 'EPG', icon: CalendarDays },
   { path: '/favorites', label: 'Favoritos', icon: Heart },
 ];
 
