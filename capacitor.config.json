@@ -2,16 +2,12 @@
   "appId": "app.lovable.c4e021b328bd442aa81dcccc0857c716",
   "appName": "IPTV Player",
   "webDir": "dist",
-  "bundledWebRuntime": false,
+  "androidScheme": "http",
   "android": {
-    "allowMixedContent": true,
-    "captureInput": true
+    "allowMixedContent": true
   },
   "server": {
-    "androidScheme": "https",
-    "allowNavigation": [
-      "*"
-    ],
+    "allowNavigation": ["*"],
     "cleartext": true
   }
 }
