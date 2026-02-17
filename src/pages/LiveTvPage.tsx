@@ -53,7 +53,18 @@ const LiveTvPage: React.FC = () => {
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
     if (credentials) {
       const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
-      navigate('/player', { state: { url, title: stream.name } });
+      // Get streams from same category for channel list
+      const categoryStreams = categoryMap.get(stream.category_id)?.streams || [];
+      navigate('/player', {
+        state: {
+          url,
+          title: stream.name,
+          streamId: stream.stream_id,
+          type: 'live' as const,
+          categoryId: stream.category_id,
+          streams: categoryStreams,
+        },
+      });
     }
   };
 
