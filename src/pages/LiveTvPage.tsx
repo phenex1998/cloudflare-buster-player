@@ -2,23 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
-import { playWithNativePlayer, playWithExternalPlayer } from '@/lib/native-player';
+import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Heart, Radio, Search, X, AlertTriangle, ExternalLink, RotateCcw } from 'lucide-react';
+import { Heart, Radio, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-interface FailedStream {
-  url: string;
-  name: string;
-  stream: LiveStream;
-}
 
 const LiveTvPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
   const [search, setSearch] = useState('');
-  const [failedStream, setFailedStream] = useState<FailedStream | null>(null);
 
   const { data: categories = [] } = useQuery({
     queryKey: ['live-categories', credentials?.host],
@@ -56,18 +48,11 @@ const LiveTvPage: React.FC = () => {
       .filter(e => e.streams.length > 0);
   }, [categoryMap, search]);
 
-  const handlePlay = async (stream: LiveStream) => {
-    setFailedStream(null);
+  const handlePlay = (stream: LiveStream) => {
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
-
-    if (!credentials) return;
-
-    const tsUrl = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
-
-    try {
-      await playWithNativePlayer(tsUrl, stream.name);
-    } catch {
-      setFailedStream({ url: tsUrl, name: stream.name, stream });
+    if (credentials) {
+      const tsUrl = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
+      playStream(tsUrl, stream.name);
     }
   };
 
@@ -169,51 +154,6 @@ const LiveTvPage: React.FC = () => {
           ))
         )}
       </div>
-
-      {/* Fallback overlay when native player fails */}
-      {failedStream && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="w-6 h-6 text-destructive shrink-0" />
-              <div>
-                <h3 className="text-base font-semibold text-foreground">Falha ao reproduzir</h3>
-                <p className="text-sm text-muted-foreground truncate">{failedStream.name}</p>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Button
-                className="w-full"
-                onClick={() => {
-                  playWithExternalPlayer(failedStream.url, failedStream.name);
-                  setFailedStream(null);
-                }}
-              >
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Abrir no Player Externo
-              </Button>
-
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={() => handlePlay(failedStream.stream)}
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Tentar Novamente
-              </Button>
-
-              <Button
-                variant="ghost"
-                className="w-full"
-                onClick={() => setFailedStream(null)}
-              >
-                Fechar
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

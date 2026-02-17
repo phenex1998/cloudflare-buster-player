@@ -1,120 +1,104 @@
 
-# Corrigir canais ao vivo com CapacitorVideoPlayer (ExoPlayer nativo)
 
-## Problema
+# Foco Android: ExoPlayer via Intent (estilo XCIPTV)
 
-Os canais ao vivo usam `playStream()` que tenta abrir via Intent Android. Isso pode falhar silenciosamente no WebView do Capacitor, resultando em carregamento infinito sem feedback.
+## O que muda
 
-## Solucao
+Remover toda logica de web player (HlsPlayer), proxy e formatacao de URL. O app passa a funcionar exclusivamente como um app Android que abre streams diretamente no ExoPlayer (VLC, MX Player, Just Player, etc.) via Intent -- exatamente como o XCIPTV faz.
 
-Usar o plugin `@capgo/capacitor-video-player` (ja instalado) que usa ExoPlayer internamente no Android. Para streams ao vivo, abrir em fullscreen com `loopOnEnd: true` e `exitOnEnd: false`. Adicionar timeout de 10s com fallback para player externo.
+## Arquivos a remover
+
+- `src/components/HlsPlayer.tsx` -- player web nao sera mais usado
+- `src/components/VideoPlayer.tsx` -- player alternativo nao necessario
 
 ## Arquivos a modificar
 
-### 1. `src/lib/native-player.ts` - Reescrever completamente
+### 1. `src/lib/native-player.ts`
+Simplificar para uma unica funcao `playStream()` que:
+- Monta a URL `.ts` direta (sem proxy, sem `.m3u8`)
+- Abre via Intent Android com `type=video/*` para ExoPlayer/VLC/MX Player
+- Fallback: `window.open(url, '_system')`
 
-Importar `VideoPlayer` de `@capgo/capacitor-video-player` e criar duas funcoes:
+### 2. `src/lib/xtream-api.ts`
+- Remover funcao `isNative()` e toda logica de proxy
+- `fetchApi()` passa a fazer fetch direto (sem proxy) -- o app roda no WebView Android que nao tem CORS
+- Remover referencias ao edge function proxy
 
-- `playWithNativePlayer(url, title)`: Usa `VideoPlayer.initPlayer()` com:
-  - `mode: 'fullscreen'`
-  - `url: url`
-  - `title: title`
-  - `rate: 1.0`
-  - `exitOnEnd: false`
-  - `loopOnEnd: true`
-  - `pipEnabled: true`
-  - `displayMode: 'landscape'`
+### 3. `src/pages/LiveTvPage.tsx`
+- Remover import do HlsPlayer
+- Remover estado `activeStream` e toda logica de player inline
+- `handlePlay()` simplesmente monta a URL `.ts` e chama `playStream()`
+- A lista de canais ocupa a tela toda (sem area de player embutido)
 
-- `playWithExternalPlayer(url, title)`: Mantem a logica de Intent Android atual como fallback
+### 4. `src/pages/MoviesPage.tsx`
+- Sem mudancas significativas -- ja usa `playStream()` corretamente
 
-- `playStream(url, title)`: Funcao principal que:
-  1. Detecta se e stream ao vivo (URL nao termina em .mp4/.mkv/.avi)
-  2. Para live: chama `playWithNativePlayer()` com timeout de 10s
-  3. Se falhar ou timeout: retorna `{ fallback: true }` para a UI mostrar botao de player externo
-  4. Para VOD: continua usando Intent (que ja funciona)
+### 5. `src/pages/SeriesDetailPage.tsx`
+- Sem mudancas significativas -- ja usa `playStream()` corretamente
 
-### 2. `src/pages/LiveTvPage.tsx` - Adicionar estado de fallback
+### 6. `supabase/functions/iptv-proxy/index.ts`
+- Manter o arquivo mas ele nao sera mais chamado pelo app (pode ser removido futuramente)
 
-- Adicionar estado `playerError` com `stream` e flag de fallback
-- `handlePlay()`:
-  1. Monta URL `.ts` (como ja faz)
-  2. Chama `playWithNativePlayer(url, title)`
-  3. Se falhar (catch ou timeout): seta `playerError` com o stream
-- Quando `playerError` esta ativo, mostrar overlay/modal com:
-  - Mensagem "Nao foi possivel reproduzir"
-  - Botao "Abrir no VLC/Player Externo" que chama `playWithExternalPlayer()`
-  - Botao "Tentar novamente"
-  - Botao "Fechar"
+## Logica do playStream (estilo XCIPTV)
 
-### 3. `src/pages/MoviesPage.tsx` - Sem mudancas
+O XCIPTV usa ExoPlayer internamente, mas quando apps externos precisam reproduzir, ele usa Intents Android. A logica sera:
 
-VOD ja funciona com Intent, nao precisa mudar.
+```text
+playStream(url, title):
+  1. Montar Intent URI:
+     intent://URL_SEM_SCHEME#Intent;scheme=http;type=video/*;S.title=TITULO;end
+  
+  2. Tentar window.location.href = intentUrl
+  
+  3. Se falhar, tentar window.open(url, '_system')
+  
+  4. Ultimo recurso: window.location.href = url
+```
+
+A URL do stream sera sempre `.ts` para canais ao vivo:
+```text
+http://host/live/username/password/stream_id.ts
+```
 
 ## Fluxo final
 
 ```text
-Usuario clica no canal ao vivo
-  -> handlePlay(stream)
-  -> URL = http://host/live/user/pass/123.ts
-  -> VideoPlayer.initPlayer({ mode: 'fullscreen', url, title, rate: 1.0, ... })
-  -> ExoPlayer abre fullscreen no Android
-  
-Se falhar em 10s:
-  -> Mostra overlay com botao "Abrir no VLC/Player Externo"
-  -> Intent Android abre seletor de apps
+Usuario clica no canal
+  -> addToHistory()
+  -> getLiveStreamUrl(credentials, stream_id, 'ts')
+     = "http://host/live/user/pass/123.ts"
+  -> playStream(url, channelName)
+     = intent://host/live/user/pass/123.ts#Intent;scheme=http;type=video/*;end
+  -> Android abre seletor de apps (VLC, MX Player, Just Player, etc.)
+  -> ExoPlayer reproduz o stream .ts diretamente
 ```
 
 ## Detalhes tecnicos
 
-### native-player.ts - API do plugin
+### xtream-api.ts - fetchApi simplificado
 
 ```text
-import { VideoPlayer } from '@capgo/capacitor-video-player';
-
-playWithNativePlayer(url, title):
-  try:
-    timeout = new Promise(reject after 10s)
-    player = VideoPlayer.initPlayer({
-      mode: 'fullscreen',
-      url: url,
-      title: title,
-      rate: 1.0,
-      exitOnEnd: false,
-      loopOnEnd: true,
-      pipEnabled: true,
-      showControls: true,
-      displayMode: 'landscape',
-    })
-    await Promise.race([player, timeout])
-  catch:
-    throw error  // LiveTvPage trata o erro
-
-playWithExternalPlayer(url, title):
-  // Intent Android (codigo atual)
-  intent://stripped#Intent;scheme=http;type=video/*;S.title=TITLE;end
+// Remover toda logica de proxy
+// Fetch direto -- WebView Android nao tem restricao CORS
+async function fetchApi<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
 ```
 
-### LiveTvPage.tsx - Estado de fallback
+### LiveTvPage.tsx - sem player inline
 
 ```text
-state: {
-  failedStream: { url, name } | null
-}
+// Remover: import HlsPlayer
+// Remover: useState activeStream
+// Remover: bloco do player embutido (sticky top)
+// Remover: bloco do EpgSection dentro do player
 
 handlePlay(stream):
-  setFailedStream(null)
-  url = getLiveStreamUrl(credentials, stream.stream_id, 'ts')
   addToHistory(...)
-  try:
-    await playWithNativePlayer(url, stream.name)
-  catch:
-    setFailedStream({ url, name: stream.name })
-
-Render (quando failedStream != null):
-  <div fixed overlay>
-    <p>"Falha ao reproduzir {name}"</p>
-    <Button "Abrir no Player Externo" onClick={playWithExternalPlayer(url, name)} />
-    <Button "Tentar Novamente" onClick={handlePlay(stream)} />
-    <Button "Fechar" onClick={setFailedStream(null)} />
-  </div>
+  const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts')
+  playStream(url, stream.name)
 ```
+
+A pagina mostra apenas a barra de busca + grid de canais, sem nenhum player embutido. Ao clicar, abre direto no player externo do Android.
