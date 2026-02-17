@@ -38,7 +38,7 @@ const PlayerPage: React.FC = () => {
           const { VideoPlayer } = await import('@capgo/capacitor-video-player');
 
           await VideoPlayer.initPlayer({
-            mode: 'fullscreen',
+            mode: 'embedded',
             url: cleanUrl,
             playerId: 'iptvPlayer',
             componentTag: 'div',
