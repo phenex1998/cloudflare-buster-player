@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
+import Hls from 'hls.js';
 import { X, Loader2, Maximize, Minimize } from 'lucide-react';
 
 interface InlinePlayerProps {
@@ -12,9 +13,21 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen(prev => !prev);
+  }, []);
+
+  // Cleanup HLS on unmount
+  useEffect(() => {
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -51,14 +64,73 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, onClose }) => {
             setLoading(false);
           }
         } else {
-          setLoading(false);
-          setError('O player nativo só funciona no app Android. Use o APK instalado no dispositivo.');
+          // Web: use <video> + Hls.js
+          const video = videoRef.current;
+          if (!video) return;
+
+          const cleanUrl = url.trim();
+          console.log('[Player Web] URL:', cleanUrl);
+
+          const isHls = cleanUrl.includes('.m3u8') || cleanUrl.includes('.ts') || cleanUrl.includes('/live/');
+
+          if (isHls && Hls.isSupported()) {
+            // Destroy previous instance
+            if (hlsRef.current) {
+              hlsRef.current.destroy();
+            }
+
+            const hls = new Hls({
+              enableWorker: true,
+              lowLatencyMode: true,
+            });
+            hlsRef.current = hls;
+
+            hls.loadSource(cleanUrl);
+            hls.attachMedia(video);
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              if (!cancelled) {
+                setLoading(false);
+                video.play().catch(() => {});
+              }
+            });
+
+            hls.on(Hls.Events.ERROR, (_event, data) => {
+              console.error('[HLS Error]', data);
+              if (data.fatal && !cancelled) {
+                setLoading(false);
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                  setError('Erro de rede ao carregar o stream. Verifique a conexão.');
+                } else {
+                  setError('Erro ao reproduzir o stream.');
+                }
+              }
+            });
+          } else if (video.canPlayType('application/vnd.apple.mpegurl') || !isHls) {
+            // Native HLS (Safari) or direct video file (mp4, mkv etc.)
+            video.src = cleanUrl;
+            video.addEventListener('loadeddata', () => {
+              if (!cancelled) {
+                setLoading(false);
+                video.play().catch(() => {});
+              }
+            }, { once: true });
+            video.addEventListener('error', () => {
+              if (!cancelled) {
+                setLoading(false);
+                setError('Erro ao reproduzir o vídeo.');
+              }
+            }, { once: true });
+          } else {
+            setLoading(false);
+            setError('Formato de vídeo não suportado neste navegador.');
+          }
         }
       } catch (err: any) {
-        console.error('Native player error:', err);
+        console.error('Player error:', err);
         if (!cancelled) {
           setLoading(false);
-          setError(err?.message || 'Erro ao iniciar o player nativo.');
+          setError(err?.message || 'Erro ao iniciar o player.');
         }
       }
     };
@@ -71,6 +143,10 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, onClose }) => {
         import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
           VideoPlayer.stopAllPlayers().catch(() => {});
         }).catch(() => {});
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
     };
   }, [url]);
@@ -126,21 +202,32 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, onClose }) => {
           </div>
         )}
 
+        {/* Video element for web playback */}
+        {!Capacitor.isNativePlatform() && (
+          <video
+            ref={videoRef}
+            className="w-full h-full object-contain"
+            playsInline
+            controls={false}
+            autoPlay
+          />
+        )}
+
         {/* Container for native plugin */}
-        <div id="fullscreen" className="w-full h-full" />
+        {Capacitor.isNativePlatform() && (
+          <div id="fullscreen" className="w-full h-full" />
+        )}
 
         {/* Error overlay */}
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-4">
             <p className="text-white/70 text-sm text-center px-8">{error}</p>
-            <div className="flex gap-3">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium"
-              >
-                Fechar
-              </button>
-            </div>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium"
+            >
+              Fechar
+            </button>
           </div>
         )}
       </div>
