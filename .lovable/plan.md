@@ -1,47 +1,81 @@
 
-# Corrigir player inline: proxy CORS e limpeza do video tag
+# Corrigir "video URL not found" no Player Nativo
 
-## Problema
-O player HLS funciona em fullscreen mas falha em modo inline (tela preta sem audio/video). A causa raiz sao duas:
-1. A URL do stream e carregada diretamente sem passar pelo proxy `iptv-proxy`, causando bloqueios CORS no browser/WebView
-2. O atributo `crossOrigin="anonymous"` (ja removido) e `webkit-playsinline` desnecessario no video tag
+## Problema identificado
 
-## Alteracoes em `src/pages/PlayerPage.tsx`
+Dois problemas causam o erro:
 
-### 1. Rotear stream pelo proxy (linha 84)
+1. **LiveTvPage usa extensao `.m3u8`** (linha 55) -- o plugin `@capgo/capacitor-video-player` tem dificuldade com URLs `.m3u8` de servidores IPTV Xtream. O correto para canais ao vivo e usar `.ts` (stream direto) que o ExoPlayer nativo reproduz sem problemas.
 
-**Antes:**
+2. **O plugin `@capgo/capacitor-video-player` valida a URL internamente** e rejeita URLs que nao passam na validacao dele (erro "video URL not found"). Isso acontece porque o plugin espera URLs com extensoes de video conhecidas ou protocolos especificos.
+
+## Solucao
+
+### 1. `src/pages/LiveTvPage.tsx`
+- Alterar a extensao de `'m3u8'` para `'ts'` na chamada `getLiveStreamUrl`
+
+### 2. `src/pages/PlayerPage.tsx`
+- Adicionar log da URL antes de iniciar o player para debug
+- Garantir que a URL nao tenha espacos ou caracteres invalidos (trim)
+- Mudar o `playerId` para `'iptvPlayer'` e `componentTag` para `'div'` (mais compativel)
+- Adicionar tratamento especifico para o erro "video URL not found" com mensagem mais clara
+- Garantir que URLs HTTP funcionem adicionando `subtitle: ''` e removendo opcoes que podem causar conflito
+
+### 3. `capacitor.config.json`
+- Adicionar `"allowNavigation": ["*"]` para permitir carregamento de URLs externas HTTP no WebView
+
+## Detalhes tecnicos
+
+### LiveTvPage - correcao da extensao
 ```text
-const url = streamState.url;
+// ANTES (linha 55):
+const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+
+// DEPOIS:
+const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
 ```
 
-**Depois:**
+### PlayerPage - inicializacao robusta do plugin
 ```text
-const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
-const url = `${PROXY_BASE}?url=${encodeURIComponent(streamState.url)}`;
+// Limpar URL
+const cleanUrl = state.url.trim();
+console.log('[Player] URL:', cleanUrl);
+
+// initPlayer com parametros minimos e compativeis
+await VideoPlayer.initPlayer({
+  mode: 'fullscreen',
+  url: cleanUrl,
+  playerId: 'iptvPlayer',
+  componentTag: 'div',
+  title: state.title || 'Stream',
+  exitOnEnd: true,
+  loopOnEnd: false,
+  showControls: true,
+  displayMode: 'landscape',
+  chromecast: false,
+});
 ```
 
-Usa a variavel de ambiente `VITE_SUPABASE_URL` que ja existe no `.env` do projeto, apontando para a Edge Function `iptv-proxy` ja deployada. Isso elimina problemas de CORS e Mixed Content tanto no browser quanto no WebView do Capacitor.
-
-### 2. Limpar atributos do video tag (linha 181)
-
-**Antes:**
-```html
-<video ref={videoRef} className="w-full h-full object-contain" playsInline muted controls />
+### capacitor.config.json - permitir navegacao externa
+```text
+{
+  "appId": "...",
+  "appName": "IPTV Player",
+  "webDir": "dist",
+  "androidScheme": "http",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "allowNavigation": ["*"],
+    "cleartext": true
+  }
+}
 ```
 
-**Depois:**
-```html
-<video ref={videoRef} className="w-full h-full object-contain" playsInline muted autoPlay controls />
-```
+## Resultado esperado
 
-Adiciona `autoPlay` de volta (estava no codigo original mas foi perdido). Mantem `playsInline` e `muted` (necessarios para autoplay em mobile). Remove qualquer `webkit-playsinline` ou `crossOrigin` residual.
-
-### 3. Remover setAttribute de webkit-playsinline no initPlayer (linha 80)
-
-A linha `video.setAttribute('webkit-playsinline', '');` sera removida pois nao e necessaria -- o atributo `playsInline` do React ja cobre ambos os casos.
-
-## Nenhuma outra alteracao
-- Nao modifica layout, CSS, hooks, estados, listeners ou logica HLS
-- Nao modifica nenhum outro arquivo
-- Nao modifica nenhuma outra funcao
+- Canais ao vivo: URL `.ts` direta reproduzida pelo ExoPlayer nativo em tela cheia
+- Filmes (VOD): URL com extensao original (`.mp4`, `.mkv`) reproduzida pelo ExoPlayer
+- Series: URL com extensao original reproduzida pelo ExoPlayer
+- Sem erros de "video URL not found"
