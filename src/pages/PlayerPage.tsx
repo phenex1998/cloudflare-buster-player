@@ -7,10 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import EpgSection from '@/components/EpgSection';
-import videojs from 'video.js';
-import 'video.js/dist/video-js.css';
-
-import type Player from 'video.js/dist/types/player';
+import Hls from 'hls.js';
 
 interface PlayerState {
   url: string;
@@ -29,8 +26,8 @@ const PlayerPage: React.FC = () => {
     location.state as PlayerState | undefined
   );
   const [search, setSearch] = useState('');
-  const videoRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<Player | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   // Fetch categories & streams for channel list
   const { data: categories = [] } = useQuery({
@@ -64,74 +61,84 @@ const PlayerPage: React.FC = () => {
       .filter(e => e.streams.length > 0);
   }, [categoryMap, search]);
 
-  // Determine source type
-  const getSourceType = (url: string, isLive?: boolean): string => {
-    if (isLive || url.includes('.m3u8')) return 'application/x-mpegURL';
-    if (url.includes('.mpd')) return 'application/dash+xml';
-    return 'video/mp4';
-  };
-
-  // Init or switch Video.js player
+  // Init or switch HLS player
   const initPlayer = useCallback((streamState: PlayerState) => {
     setLoading(true);
     setError(null);
 
-    const sourceType = getSourceType(streamState.url, streamState.isLive);
+    const video = videoRef.current;
+    if (!video) return;
 
-    // If player already exists, just swap the source
-    if (playerRef.current) {
-      playerRef.current.src({ src: streamState.url, type: sourceType });
-      playerRef.current.play()?.catch(() => {});
-      return;
+    // Destroy previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
     }
 
-    // Create video element inside container
-    if (!videoRef.current) return;
-    const videoEl = document.createElement('video-js');
-    videoEl.classList.add('vjs-big-play-centered', 'vjs-fill');
-    videoRef.current.appendChild(videoEl);
+    // Force inline attributes
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.muted = true;
+    video.controls = true;
 
-    const player = videojs(videoEl, {
-      autoplay: true,
-      controls: true,
-      responsive: true,
-      fluid: false,
-      playsinline: true,
-      liveui: !!streamState.isLive,
-      sources: [{ src: streamState.url, type: sourceType }],
-      html5: {
-        vhs: {
-          overrideNative: true,
-          enableLowInitialPlaylist: true,
-          useDevicePixelRatio: true,
+    const url = streamState.url;
+    const isHls = url.includes('.m3u8') || streamState.isLive;
+
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        xhrSetup: (xhr) => {
+          xhr.withCredentials = false;
         },
-        nativeAudioTracks: false,
-        nativeVideoTracks: false,
-      },
-    });
+      });
 
-    player.on('playing', () => setLoading(false));
-    player.on('waiting', () => setLoading(true));
-    player.on('canplay', () => setLoading(false));
+      hls.loadSource(url);
+      hls.attachMedia(video);
 
-    player.on('error', () => {
-      const err = player.error();
-      console.error('[Video.js] Error:', err);
-      setLoading(false);
-      setError(`Erro de reprodução (código ${err?.code}). Tentando reconectar...`);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setLoading(false);
+        video.play().catch(() => {});
+      });
 
-      // Auto-retry after 3s
-      setTimeout(() => {
-        if (playerRef.current && currentStream) {
-          setError(null);
-          setLoading(true);
-          player.src({ src: currentStream.url, type: getSourceType(currentStream.url, currentStream.isLive) });
-          player.play()?.catch(() => {});
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.error('[HLS] Error:', data);
+        if (data.fatal) {
+          setLoading(false);
+          setError(`Erro de reprodução HLS (${data.type}). Tentando reconectar...`);
+          setTimeout(() => {
+            if (hlsRef.current) {
+              setError(null);
+              setLoading(true);
+              hls.loadSource(url);
+            }
+          }, 3000);
         }
-      }, 3000);
-    });
+      });
 
-    playerRef.current = player;
+      hlsRef.current = hls;
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS (Safari/iOS)
+      video.src = url;
+      video.addEventListener('loadedmetadata', () => {
+        setLoading(false);
+        video.play().catch(() => {});
+      }, { once: true });
+    } else {
+      // Fallback for non-HLS URLs
+      video.src = url;
+      video.addEventListener('loadeddata', () => {
+        setLoading(false);
+        video.play().catch(() => {});
+      }, { once: true });
+    }
+
+    video.addEventListener('waiting', () => setLoading(true));
+    video.addEventListener('playing', () => setLoading(false));
+    video.addEventListener('error', () => {
+      setLoading(false);
+      setError('Erro ao reproduzir o vídeo.');
+    });
   }, []);
 
   // Start / switch stream
@@ -143,9 +150,9 @@ const PlayerPage: React.FC = () => {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (playerRef.current) {
-        playerRef.current.dispose();
-        playerRef.current = null;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
     };
   }, []);
@@ -169,9 +176,9 @@ const PlayerPage: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       {/* Top: Video Area */}
-      <div className="relative shrink-0" style={{ height: '35vh', minHeight: '250px', background: '#000' }}>
-        {/* Video.js container */}
-        <div ref={videoRef} className="w-full h-full [&_.video-js]:w-full [&_.video-js]:h-full [&_video]:object-contain" />
+      <div className="relative shrink-0 w-full" style={{ aspectRatio: '16/9', minHeight: '220px', maxHeight: '40vh', background: '#000' }}>
+        {/* HLS Video element */}
+        <video ref={videoRef} className="w-full h-full object-contain" playsInline muted controls />
 
         {/* Header overlay */}
         <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent p-3 flex items-center gap-2 pointer-events-auto">
