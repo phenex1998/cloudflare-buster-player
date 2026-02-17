@@ -52,7 +52,7 @@ const LiveTvPage: React.FC = () => {
   const handlePlay = (stream: LiveStream) => {
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
     if (credentials) {
-      const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+      const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
       navigate('/player', { state: { url, title: stream.name } });
     }
   };

@@ -6,9 +6,6 @@
   "android": {
     "allowMixedContent": true
   },
-  "ios": {
-    "allowsInlineMediaPlayback": true
-  },
   "server": {
     "allowNavigation": ["*"],
     "cleartext": true

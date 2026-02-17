@@ -1,78 +1,81 @@
 
-# Adicionar Debug Visivel e Botao de Teste ao PlayerPage
+# Corrigir "video URL not found" no Player Nativo
 
-## Resumo
+## Problema identificado
 
-Atualizar o `src/pages/PlayerPage.tsx` para incluir um painel de debug visivel na tela (sem depender do console), um botao "Forcar Reproducao", um botao de teste com HLS publico, e um timeout de 10 segundos. Isso vai ajudar a diagnosticar por que o spinner nao para no WebView Android.
+Dois problemas causam o erro:
 
-## Mudancas no arquivo `src/pages/PlayerPage.tsx`
+1. **LiveTvPage usa extensao `.m3u8`** (linha 55) -- o plugin `@capgo/capacitor-video-player` tem dificuldade com URLs `.m3u8` de servidores IPTV Xtream. O correto para canais ao vivo e usar `.ts` (stream direto) que o ExoPlayer nativo reproduz sem problemas.
 
-### 1. Adicionar estado para armazenar a URL resolvida
+2. **O plugin `@capgo/capacitor-video-player` valida a URL internamente** e rejeita URLs que nao passam na validacao dele (erro "video URL not found"). Isso acontece porque o plugin espera URLs com extensoes de video conhecidas ou protocolos especificos.
 
-Novo state `resolvedUrl` para exibir no painel de debug:
+## Solucao
 
-```typescript
-const [resolvedUrl, setResolvedUrl] = useState<string>('');
-```
+### 1. `src/pages/LiveTvPage.tsx`
+- Alterar a extensao de `'m3u8'` para `'ts'` na chamada `getLiveStreamUrl`
 
-### 2. Atualizar o useEffect
+### 2. `src/pages/PlayerPage.tsx`
+- Adicionar log da URL antes de iniciar o player para debug
+- Garantir que a URL nao tenha espacos ou caracteres invalidos (trim)
+- Mudar o `playerId` para `'iptvPlayer'` e `componentTag` para `'div'` (mais compativel)
+- Adicionar tratamento especifico para o erro "video URL not found" com mensagem mais clara
+- Garantir que URLs HTTP funcionem adicionando `subtitle: ''` e removendo opcoes que podem causar conflito
 
-- Guardar a URL resolvida no state para exibicao no debug panel
-- Aumentar timeout para 10 segundos
-- Mensagem de erro atualizada para mencionar "Forcar Reproducao"
-
-### 3. Substituir o overlay de loading atual
-
-Trocar o spinner simples (Loader2) pelo painel de debug completo com:
-- Spinner animado CSS
-- Texto "Carregando stream..."
-- Painel de debug mostrando: Plataforma, URL (truncada), ReadyState, NetworkState
-- Botao verde "FORCAR REPRODUCAO" que chama `video.play()` com alert em caso de erro
-
-### 4. Adicionar botao "Testar HLS Publico" no header
-
-Botao azul temporario ao lado do titulo que carrega `https://test-streams.mux.dev/x264/1080p.m3u8` diretamente no video element, permitindo testar se o problema e da URL ou do WebView.
-
-### 5. Atualizar handlers do video
-
-- Adicionar `onLoadStart` handler
-- Manter todos os handlers existentes (`onLoadedData`, `onLoadedMetadata`, `onCanPlay`, `onPlaying`, `onWaiting`, `onError`, `onStalled`)
+### 3. `capacitor.config.json`
+- Adicionar `"allowNavigation": ["*"]` para permitir carregamento de URLs externas HTTP no WebView
 
 ## Detalhes tecnicos
 
-### Estrutura final do componente
-
+### LiveTvPage - correcao da extensao
 ```text
-PlayerPage
-  |-- States: error, loading, resolvedUrl, videoRef
-  |-- useEffect([state.url])
-  |     |-- setResolvedUrl(url)
-  |     |-- video.src = url
-  |     |-- video.load() + video.play()
-  |     |-- setTimeout(10s) -> force stop loading
-  |
-  |-- Container 35vh
-        |-- Header overlay
-        |     |-- Botao voltar
-        |     |-- Titulo
-        |     |-- Botao "Testar HLS Publico" (azul, temporario)
-        |
-        |-- <video> com todos os handlers
-        |
-        |-- Loading overlay (z-50, quando loading=true)
-        |     |-- Spinner CSS
-        |     |-- "Carregando stream..."
-        |     |-- Debug panel (plataforma, URL, readyState, networkState)
-        |     |-- Botao "FORCAR REPRODUCAO" (verde)
-        |
-        |-- Error overlay (quando error != null)
+// ANTES (linha 55):
+const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+
+// DEPOIS:
+const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
 ```
 
-### O que esse debug vai revelar
+### PlayerPage - inicializacao robusta do plugin
+```text
+// Limpar URL
+const cleanUrl = state.url.trim();
+console.log('[Player] URL:', cleanUrl);
 
-- **ReadyState 0**: video nao recebeu nada (URL invalida ou CORS)
-- **ReadyState 1**: metadata recebida mas sem dados
-- **ReadyState 2+**: dados chegando, problema e no autoplay
-- **NetworkState 3**: erro de rede (URL inacessivel)
-- Botao "Testar HLS Publico" isola se o problema e do WebView ou da URL do IPTV
-- Botao "Forcar Reproducao" testa se o problema e restricao de autoplay
+// initPlayer com parametros minimos e compativeis
+await VideoPlayer.initPlayer({
+  mode: 'fullscreen',
+  url: cleanUrl,
+  playerId: 'iptvPlayer',
+  componentTag: 'div',
+  title: state.title || 'Stream',
+  exitOnEnd: true,
+  loopOnEnd: false,
+  showControls: true,
+  displayMode: 'landscape',
+  chromecast: false,
+});
+```
+
+### capacitor.config.json - permitir navegacao externa
+```text
+{
+  "appId": "...",
+  "appName": "IPTV Player",
+  "webDir": "dist",
+  "androidScheme": "http",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "allowNavigation": ["*"],
+    "cleartext": true
+  }
+}
+```
+
+## Resultado esperado
+
+- Canais ao vivo: URL `.ts` direta reproduzida pelo ExoPlayer nativo em tela cheia
+- Filmes (VOD): URL com extensao original (`.mp4`, `.mkv`) reproduzida pelo ExoPlayer
+- Series: URL com extensao original reproduzida pelo ExoPlayer
+- Sem erros de "video URL not found"
