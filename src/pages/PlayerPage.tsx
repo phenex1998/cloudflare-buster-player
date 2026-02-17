@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import Hls from 'hls.js';
+import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 
 interface PlayerState {
@@ -15,90 +15,65 @@ const PlayerPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const state = location.state as PlayerState | undefined;
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
-
-  const initPlayer = useCallback((streamState: PlayerState) => {
-    const video = videoRef.current;
-    if (!video || !streamState.url) return;
-
-    setLoading(true);
-    setError(null);
-
-    // destruir instância anterior
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    // reset completo do elemento video
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-
-    // usar proxy obrigatoriamente
-    const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
-    const streamUrl = `${PROXY_BASE}?url=${encodeURIComponent(streamState.url)}`;
-
-    // FORÇAR uso exclusivo do hls.js
-    const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: false,
-      backBufferLength: 90,
-      maxBufferLength: 60,
-      maxMaxBufferLength: 120,
-      startLevel: -1,
-      capLevelToPlayerSize: true,
-      manifestLoadingTimeOut: 20000,
-      manifestLoadingMaxRetry: 6,
-      levelLoadingTimeOut: 20000,
-      levelLoadingMaxRetry: 6,
-      fragLoadingTimeOut: 20000,
-      fragLoadingMaxRetry: 6,
-    });
-
-    hlsRef.current = hls;
-
-    hls.attachMedia(video);
-
-    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-      hls.loadSource(streamUrl);
-    });
-
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      setLoading(false);
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(() => {});
-      }
-    });
-
-    hls.on(Hls.Events.ERROR, (_event, data) => {
-      if (data.fatal) {
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          hls.startLoad();
-        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          hls.recoverMediaError();
-        } else {
-          setError('Erro ao reproduzir canal');
-          hls.destroy();
-        }
-      }
-    });
-  }, []);
-
   useEffect(() => {
     if (!state?.url) return;
 
-    initPlayer(state);
+    let cancelled = false;
+    const isNative = Capacitor.isNativePlatform();
 
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+    const startPlayer = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        if (isNative) {
+          const cleanUrl = state.url.trim();
+          console.log('[Player] URL:', cleanUrl);
+
+          const { VideoPlayer } = await import('@capgo/capacitor-video-player');
+
+          await VideoPlayer.initPlayer({
+            mode: 'fullscreen',
+            url: cleanUrl,
+            playerId: 'iptvPlayer',
+            componentTag: 'div',
+            title: state.title || 'Stream',
+            exitOnEnd: true,
+            loopOnEnd: false,
+            showControls: true,
+            displayMode: 'landscape',
+            chromecast: false,
+          });
+
+          // initPlayer resolves when the native player closes
+          if (!cancelled) {
+            navigate(-1);
+          }
+        } else {
+          // Web preview fallback: open URL directly (won't work for IPTV but avoids crash)
+          setLoading(false);
+          setError('O player nativo só funciona no app Android. Use o APK instalado no dispositivo.');
+        }
+      } catch (err: any) {
+        console.error('Native player error:', err);
+        if (!cancelled) {
+          setLoading(false);
+          setError(err?.message || 'Erro ao iniciar o player nativo.');
+        }
       }
     };
-  }, [state?.url, initPlayer]);
+
+    startPlayer();
+
+    return () => {
+      cancelled = true;
+      if (isNative) {
+        import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
+          VideoPlayer.stopAllPlayers().catch(() => {});
+        }).catch(() => {});
+      }
+    };
+  }, [state?.url]);
 
   if (!state?.url) {
     return (
@@ -128,16 +103,8 @@ const PlayerPage: React.FC = () => {
         </div>
       )}
 
-      <video
-        ref={videoRef}
-        className="w-full h-full object-contain bg-black"
-        autoPlay
-        muted
-        controls
-        playsInline
-        disablePictureInPicture
-        controlsList="nofullscreen nodownload noremoteplayback"
-      />
+      {/* Container for native plugin */}
+      <div id="fullscreen" className="flex-1" />
 
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-4">
@@ -145,7 +112,9 @@ const PlayerPage: React.FC = () => {
           <div className="flex gap-3">
             <button
               onClick={() => {
-                if (state) initPlayer(state);
+                setError(null);
+                setLoading(true);
+                window.location.reload();
               }}
               className="px-4 py-2 rounded-lg bg-white/10 text-white text-sm font-medium"
             >
