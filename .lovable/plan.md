@@ -1,81 +1,69 @@
 
-# Corrigir "video URL not found" no Player Nativo
 
-## Problema identificado
+# Player Hibrido: Nativo Fullscreen + Inline Web com Proxy
 
-Dois problemas causam o erro:
+## Resumo
 
-1. **LiveTvPage usa extensao `.m3u8`** (linha 55) -- o plugin `@capgo/capacitor-video-player` tem dificuldade com URLs `.m3u8` de servidores IPTV Xtream. O correto para canais ao vivo e usar `.ts` (stream direto) que o ExoPlayer nativo reproduz sem problemas.
+Reescrever o `PlayerPage.tsx` para suportar dois modos de reprodução:
+- **Android nativo**: continua usando `capacitor-video-player` em fullscreen (sem CORS)
+- **Web/Preview (inline)**: usa `hls.js` com a Edge Function `iptv-proxy` para contornar CORS, exibindo o video em um container de 35vh
 
-2. **O plugin `@capgo/capacitor-video-player` valida a URL internamente** e rejeita URLs que nao passam na validacao dele (erro "video URL not found"). Isso acontece porque o plugin espera URLs com extensoes de video conhecidas ou protocolos especificos.
+Tambem sera necessario alterar o `LiveTvPage.tsx` para enviar URLs `.m3u8` (necessario para o HLS.js parsear o manifesto no modo web).
 
-## Solucao
+## Mudancas
 
 ### 1. `src/pages/LiveTvPage.tsx`
-- Alterar a extensao de `'m3u8'` para `'ts'` na chamada `getLiveStreamUrl`
+- Mudar a extensao de volta para `'m3u8'` na chamada `getLiveStreamUrl` (linha 55)
+- O HLS.js precisa do manifesto `.m3u8` para funcionar; no Android nativo o ExoPlayer tambem aceita `.m3u8` sem problemas
 
-### 2. `src/pages/PlayerPage.tsx`
-- Adicionar log da URL antes de iniciar o player para debug
-- Garantir que a URL nao tenha espacos ou caracteres invalidos (trim)
-- Mudar o `playerId` para `'iptvPlayer'` e `componentTag` para `'div'` (mais compativel)
-- Adicionar tratamento especifico para o erro "video URL not found" com mensagem mais clara
-- Garantir que URLs HTTP funcionem adicionando `subtitle: ''` e removendo opcoes que podem causar conflito
+### 2. `src/pages/PlayerPage.tsx` (reescrita completa)
+- Adicionar constante `PROXY_BASE` usando `VITE_SUPABASE_URL` (ja disponivel no `.env`) para construir a URL do proxy: `${VITE_SUPABASE_URL}/functions/v1/iptv-proxy`
+- Adicionar funcao helper `proxyUrl(url)` que encapsula a URL original via `?url=encodeURIComponent(url)`
+- **Modo nativo** (Capacitor): manter logica atual com `VideoPlayer.initPlayer` fullscreen, passando a URL direta (sem proxy)
+- **Modo web**: usar `hls.js` com `xhrSetup` para rotear todas as requisicoes (manifesto + segmentos `.ts`) pelo proxy
+- Container de video inline: `35vh`, `min-h-[220px]`, com controles HTML5, `playsInline`, `crossOrigin="anonymous"`
+- Error handler detalhado do HLS com log de `data.type`, `data.details`
+- Recovery automatico para `NETWORK_ERROR` e `MEDIA_ERROR`
+- Cleanup do HLS no unmount
 
-### 3. `capacitor.config.json`
-- Adicionar `"allowNavigation": ["*"]` para permitir carregamento de URLs externas HTTP no WebView
+### 3. Nenhuma variavel de ambiente extra necessaria
+- O projeto ja tem `VITE_SUPABASE_URL` configurado automaticamente, entao a URL do proxy sera construida como `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`
 
 ## Detalhes tecnicos
 
-### LiveTvPage - correcao da extensao
-```text
-// ANTES (linha 55):
-const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+### Estrutura do PlayerPage
 
-// DEPOIS:
-const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
+```text
+PlayerPage
+  |-- detecta plataforma (Capacitor.isNativePlatform)
+  |
+  |-- SE nativo:
+  |     |-- VideoPlayer.initPlayer({ mode: 'fullscreen', url: directUrl })
+  |     |-- navigate(-1) ao fechar
+  |
+  |-- SE web:
+        |-- useRef<HTMLVideoElement>
+        |-- Hls.isSupported() ? hls.loadSource(proxyUrl(url)) : video.src = proxyUrl(url)
+        |-- hls.config.xhrSetup intercepta segmentos pelo proxy
+        |-- container 35vh com header overlay + controles nativos
+        |-- error recovery (startLoad / recoverMediaError)
 ```
 
-### PlayerPage - inicializacao robusta do plugin
+### Proxy URL helper
 ```text
-// Limpar URL
-const cleanUrl = state.url.trim();
-console.log('[Player] URL:', cleanUrl);
+const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
+const proxyUrl = (url: string) => `${PROXY_BASE}?url=${encodeURIComponent(url)}`;
+```
 
-// initPlayer com parametros minimos e compativeis
-await VideoPlayer.initPlayer({
-  mode: 'fullscreen',
-  url: cleanUrl,
-  playerId: 'iptvPlayer',
-  componentTag: 'div',
-  title: state.title || 'Stream',
-  exitOnEnd: true,
-  loopOnEnd: false,
-  showControls: true,
-  displayMode: 'landscape',
-  chromecast: false,
+### HLS.js xhrSetup para proxy de segmentos
+```text
+const hls = new Hls({
+  xhrSetup: (xhr, url) => {
+    const proxied = proxyUrl(url);
+    xhr.open('GET', proxied, true);
+  }
 });
 ```
 
-### capacitor.config.json - permitir navegacao externa
-```text
-{
-  "appId": "...",
-  "appName": "IPTV Player",
-  "webDir": "dist",
-  "androidScheme": "http",
-  "android": {
-    "allowMixedContent": true
-  },
-  "server": {
-    "allowNavigation": ["*"],
-    "cleartext": true
-  }
-}
-```
+Isso garante que tanto o manifesto quanto cada segmento `.ts` passem pelo proxy, evitando CORS.
 
-## Resultado esperado
-
-- Canais ao vivo: URL `.ts` direta reproduzida pelo ExoPlayer nativo em tela cheia
-- Filmes (VOD): URL com extensao original (`.mp4`, `.mkv`) reproduzida pelo ExoPlayer
-- Series: URL com extensao original reproduzida pelo ExoPlayer
-- Sem erros de "video URL not found"
