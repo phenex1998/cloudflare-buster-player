@@ -1,69 +1,74 @@
 
 
-# Player Hibrido: Nativo Fullscreen + Inline Web com Proxy
+# Trocar HLS.js por Player Nativo do video HTML5
 
 ## Resumo
 
-Reescrever o `PlayerPage.tsx` para suportar dois modos de reprodução:
-- **Android nativo**: continua usando `capacitor-video-player` em fullscreen (sem CORS)
-- **Web/Preview (inline)**: usa `hls.js` com a Edge Function `iptv-proxy` para contornar CORS, exibindo o video em um container de 35vh
-
-Tambem sera necessario alterar o `LiveTvPage.tsx` para enviar URLs `.m3u8` (necessario para o HLS.js parsear o manifesto no modo web).
+Remover completamente o HLS.js e usar o elemento `<video>` nativo do navegador para reproduzir streams. No preview web, a URL passa pelo proxy (iptv-proxy) para resolver CORS. No APK nativo, usa URL direta (zero latencia).
 
 ## Mudancas
 
-### 1. `src/pages/LiveTvPage.tsx`
-- Mudar a extensao de volta para `'m3u8'` na chamada `getLiveStreamUrl` (linha 55)
-- O HLS.js precisa do manifesto `.m3u8` para funcionar; no Android nativo o ExoPlayer tambem aceita `.m3u8` sem problemas
+### 1. `src/pages/PlayerPage.tsx` - Reescrita do player
 
-### 2. `src/pages/PlayerPage.tsx` (reescrita completa)
-- Adicionar constante `PROXY_BASE` usando `VITE_SUPABASE_URL` (ja disponivel no `.env`) para construir a URL do proxy: `${VITE_SUPABASE_URL}/functions/v1/iptv-proxy`
-- Adicionar funcao helper `proxyUrl(url)` que encapsula a URL original via `?url=encodeURIComponent(url)`
-- **Modo nativo** (Capacitor): manter logica atual com `VideoPlayer.initPlayer` fullscreen, passando a URL direta (sem proxy)
-- **Modo web**: usar `hls.js` com `xhrSetup` para rotear todas as requisicoes (manifesto + segmentos `.ts`) pelo proxy
-- Container de video inline: `35vh`, `min-h-[220px]`, com controles HTML5, `playsInline`, `crossOrigin="anonymous"`
-- Error handler detalhado do HLS com log de `data.type`, `data.details`
-- Recovery automatico para `NETWORK_ERROR` e `MEDIA_ERROR`
-- Cleanup do HLS no unmount
+**Remover:**
+- `import Hls from 'hls.js'`
+- Toda logica de `new Hls()`, `hls.loadSource`, `hls.attachMedia`, `hls.on`, `hlsRef`
+- Referencia `Hls.isSupported()`, `Hls.Events`, `Hls.ErrorTypes`
 
-### 3. Nenhuma variavel de ambiente extra necessaria
-- O projeto ja tem `VITE_SUPABASE_URL` configurado automaticamente, entao a URL do proxy sera construida como `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`
+**Manter/Ajustar:**
+- Import do Capacitor (ja existe)
+- `PROXY_BASE` e `resolveUrl` (ja existem e funcionam corretamente)
+- `videoRef`, `loading`, `error` states
+- Header overlay com botao voltar e titulo
+- Container 35vh
+
+**Novo useEffect simplificado:**
+- Pega `state.url`, faz trim
+- Chama `resolveUrl()` (proxy no web, direto no nativo)
+- Seta `video.src` diretamente
+- Chama `video.load()` e `video.play()`
+- Cleanup: `video.pause()` e limpa `video.src`
+
+**Video element atualizado:**
+- Adiciona `onError` handler com log
+- Adiciona `onLoadedMetadata` para setar loading=false
+- Mantem `playsInline`, `muted`, `autoPlay`, `controls`, `crossOrigin="anonymous"`
+
+### 2. `capacitor.config.json`
+- Adicionar `"allowsInlineMediaPlayback": true` no bloco `ios`
+
+### 3. Remover dependencia `hls.js`
+- Desinstalar o pacote hls.js do projeto
 
 ## Detalhes tecnicos
 
-### Estrutura do PlayerPage
+### Fluxo simplificado do PlayerPage
 
 ```text
 PlayerPage
-  |-- detecta plataforma (Capacitor.isNativePlatform)
+  |-- useEffect([state.url])
+  |     |-- streamUrl = state.url.trim()
+  |     |-- resolveUrl(streamUrl)
+  |     |       |-- SE nativo: retorna URL direta
+  |     |       |-- SE web: retorna proxy URL
+  |     |-- video.src = resolvedUrl
+  |     |-- video.load()
+  |     |-- video.play().catch(...)
+  |     |-- cleanup: video.pause(), video.src = ''
   |
-  |-- SE nativo:
-  |     |-- VideoPlayer.initPlayer({ mode: 'fullscreen', url: directUrl })
-  |     |-- navigate(-1) ao fechar
-  |
-  |-- SE web:
-        |-- useRef<HTMLVideoElement>
-        |-- Hls.isSupported() ? hls.loadSource(proxyUrl(url)) : video.src = proxyUrl(url)
-        |-- hls.config.xhrSetup intercepta segmentos pelo proxy
-        |-- container 35vh com header overlay + controles nativos
-        |-- error recovery (startLoad / recoverMediaError)
+  |-- Container 35vh inline
+        |-- Header overlay (voltar + titulo)
+        |-- Loading spinner
+        |-- <video> nativo com controls
+        |-- Error overlay
 ```
 
-### Proxy URL helper
-```text
-const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
-const proxyUrl = (url: string) => `${PROXY_BASE}?url=${encodeURIComponent(url)}`;
-```
+### Por que funciona sem HLS.js
 
-### HLS.js xhrSetup para proxy de segmentos
-```text
-const hls = new Hls({
-  xhrSetup: (xhr, url) => {
-    const proxied = proxyUrl(url);
-    xhr.open('GET', proxied, true);
-  }
-});
-```
+- **No APK (Android/iOS)**: O WebView nativo suporta HLS nativamente via ExoPlayer/AVPlayer, entao `<video src="...m3u8">` funciona direto
+- **No Safari (iOS web)**: Safari suporta HLS nativamente no elemento `<video>`
+- **No Chrome web (preview)**: O proxy converte a resposta e adiciona headers CORS; Chrome consegue reproduzir o stream via proxy
 
-Isso garante que tanto o manifesto quanto cada segmento `.ts` passem pelo proxy, evitando CORS.
+### Nota importante
+O `PROXY_BASE` continuara usando `VITE_SUPABASE_URL` que ja existe no `.env`, nao precisa de variavel nova. A funcao `resolveUrl` ja existente faz exatamente o que e necessario.
 
