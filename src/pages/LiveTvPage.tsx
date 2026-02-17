@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
-import VideoPlayer from '@/components/VideoPlayer';
+import VideoPlayerModal from '@/components/VideoPlayerModal';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -34,13 +34,13 @@ const LiveTvPage: React.FC = () => {
     <div className="min-h-screen bg-background pb-20">
       <AppHeader title="TV ao Vivo" />
 
+      {/* Modal player overlay */}
       {activeStream && credentials && (
-        <div className="sticky top-[57px] z-20">
-          <VideoPlayer
-            url={xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id)}
-            title={activeStream.name}
-          />
-        </div>
+        <VideoPlayerModal
+          url={xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id)}
+          title={activeStream.name}
+          onClose={() => setActiveStream(null)}
+        />
       )}
 
       {/* Categories */}
@@ -109,7 +109,7 @@ const LiveTvPage: React.FC = () => {
                 <p className="text-sm font-medium text-foreground truncate">{stream.name}</p>
               </div>
               {activeStream?.stream_id === stream.stream_id && (
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
               )}
               <button
                 onClick={e => {
