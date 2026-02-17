@@ -79,7 +79,8 @@ const PlayerPage: React.FC = () => {
     video.removeAttribute('src');
     video.load();
 
-    const url = streamState.url;
+    const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
+    const url = `${PROXY_BASE}?url=${encodeURIComponent(streamState.url)}`;
     
     // Configuração robusta para IPTV (HLS)
     if (Hls.isSupported()) {
@@ -161,11 +162,9 @@ const PlayerPage: React.FC = () => {
           ref={videoRef} 
           className="w-full h-full object-contain z-0" 
           playsInline 
-          webkit-playsinline="true"
           muted 
           autoPlay
           controls
-          crossOrigin="anonymous"
         />
 
         {/* Overlay de carregamento e erro */}
