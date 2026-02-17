@@ -99,9 +99,10 @@ const PlayerPage: React.FC = () => {
       liveui: !!streamState.isLive,
       sources: [{ src: streamState.url, type: sourceType }],
       html5: {
-        hls: {
+        vhs: {
           overrideNative: true,
           enableLowInitialPlaylist: true,
+          useDevicePixelRatio: true,
         },
         nativeAudioTracks: false,
         nativeVideoTracks: false,
