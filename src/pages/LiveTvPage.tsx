@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
-import VideoPlayer from '@/components/VideoPlayer';
+import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -25,23 +25,19 @@ const LiveTvPage: React.FC = () => {
     enabled: !!credentials,
   });
 
-  const playStream = (stream: LiveStream) => {
+  const handlePlay = (stream: LiveStream) => {
     setActiveStream(stream);
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
+    if (credentials) {
+      playStream(xtreamApi.getLiveStreamUrl(credentials, stream.stream_id), stream.name);
+    }
   };
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppHeader title="TV ao Vivo" />
 
-      {activeStream && credentials && (
-        <div className="sticky top-[57px] z-20">
-          <VideoPlayer
-            url={xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id)}
-            title={activeStream.name}
-          />
-        </div>
-      )}
+      {/* Native player opens fullscreen — no embedded player needed */}
 
       {/* Categories */}
       <div className="px-4 py-3 overflow-x-auto flex gap-2 no-scrollbar">
@@ -85,7 +81,7 @@ const LiveTvPage: React.FC = () => {
           streams.map((stream: LiveStream) => (
             <button
               key={stream.stream_id}
-              onClick={() => playStream(stream)}
+              onClick={() => handlePlay(stream)}
               className={cn(
                 'w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left',
                 activeStream?.stream_id === stream.stream_id

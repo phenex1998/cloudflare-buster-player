@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
-import VideoPlayer from '@/components/VideoPlayer';
+import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Film } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -25,23 +25,22 @@ const MoviesPage: React.FC = () => {
     enabled: !!credentials,
   });
 
-  const playMovie = (movie: VodStream) => {
+  const handlePlayMovie = (movie: VodStream) => {
     setActiveMovie(movie);
     addToHistory({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
+    if (credentials) {
+      playStream(
+        xtreamApi.getVodStreamUrl(credentials, movie.stream_id, movie.container_extension || 'mp4'),
+        movie.name
+      );
+    }
   };
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppHeader title="Filmes" />
 
-      {activeMovie && credentials && (
-        <div className="sticky top-[57px] z-20">
-          <VideoPlayer
-            url={xtreamApi.getVodStreamUrl(credentials, activeMovie.stream_id, activeMovie.container_extension || 'mp4')}
-            title={activeMovie.name}
-          />
-        </div>
-      )}
+      {/* Native player opens fullscreen — no embedded player needed */}
 
       {/* Categories */}
       <div className="px-4 py-3 overflow-x-auto flex gap-2 no-scrollbar">
@@ -81,7 +80,7 @@ const MoviesPage: React.FC = () => {
           movies.map((movie: VodStream) => (
             <button
               key={movie.stream_id}
-              onClick={() => playMovie(movie)}
+              onClick={() => handlePlayMovie(movie)}
               className="text-left group relative"
             >
               <div className={cn(

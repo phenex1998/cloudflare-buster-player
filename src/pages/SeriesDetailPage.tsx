@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi } from '@/lib/xtream-api';
-import VideoPlayer from '@/components/VideoPlayer';
+import { playStream } from '@/lib/native-player';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -24,9 +24,15 @@ const SeriesDetailPage: React.FC = () => {
   const episodes = detail?.episodes?.[String(selectedSeason)] || [];
   const seasons = detail?.seasons || [];
 
-  const playEpisode = (ep: typeof episodes[0]) => {
+  const handlePlayEpisode = (ep: typeof episodes[0]) => {
     setActiveEpisode({ id: ep.id, ext: ep.container_extension, title: ep.title });
     addToHistory({ id: ep.id, type: 'series', name: `${detail?.info?.name} - ${ep.title}` });
+    if (credentials) {
+      playStream(
+        xtreamApi.getSeriesStreamUrl(credentials!, ep.id, ep.container_extension),
+        ep.title
+      );
+    }
   };
 
   if (isLoading) {
@@ -50,12 +56,7 @@ const SeriesDetailPage: React.FC = () => {
       </div>
 
       {/* Player */}
-      {activeEpisode && credentials && (
-        <VideoPlayer
-          url={xtreamApi.getSeriesStreamUrl(credentials, activeEpisode.id, activeEpisode.ext)}
-          title={activeEpisode.title}
-        />
-      )}
+      {/* Native player opens fullscreen — no embedded player needed */}
 
       {/* Info */}
       {detail?.info?.plot && (
@@ -85,7 +86,7 @@ const SeriesDetailPage: React.FC = () => {
         {episodes.map(ep => (
           <button
             key={ep.id}
-            onClick={() => playEpisode(ep)}
+            onClick={() => handlePlayEpisode(ep)}
             className={cn(
               'w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left',
               activeEpisode?.id === ep.id ? 'bg-primary/10 border border-primary/20' : 'hover:bg-muted'
