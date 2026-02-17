@@ -1,90 +1,105 @@
 
 
-# Corrigir reprodução de canais ao vivo no Android
+# Corrigir reproducao de canais ao vivo (Web + Android)
 
-## Causa raiz identificada
+## Problema
 
-O problema **NAO e o player em si** -- e que `Capacitor.isNativePlatform()` retorna `false` quando o app carrega de uma URL remota (preview do Lovable via `server.url`). Isso e um bug documentado do Capacitor. Como resultado, o codigo SEMPRE cai no caminho web (HlsPlayer com .m3u8), que trava no WebView do Android por problemas de CORS e mixed content.
+Quando o usuario clica em um canal, nada acontece e nenhum erro aparece. Isso tem duas causas:
 
-```text
-Fluxo atual (BUGADO):
-  Click canal -> Capacitor.isNativePlatform() = FALSE (bug!)
-    -> cai no else -> setActiveStream() -> HlsPlayer(.m3u8)
-    -> WebView tenta carregar .m3u8 -> CORS/mixed content -> loading infinito
-```
+**Na Web/Preview:** O HlsPlayer recebe uma URL direta do servidor IPTV (ex: `http://servidor/live/user/pass/123.m3u8`). O hls.js tenta buscar essa URL via XHR, mas como o app roda em HTTPS e o servidor IPTV e HTTP, o navegador bloqueia por "mixed content" e CORS. Resultado: loading infinito.
+
+**No Android:** O intent:// pode ser bloqueado silenciosamente pelo WebView, e nao ha fallback visivel para o usuario.
 
 ## Solucao
 
-### 1. Substituir deteccao de plataforma
+### 1. Atualizar o proxy para suportar GET (streaming)
 
-Trocar `Capacitor.isNativePlatform()` por deteccao via **User Agent** do navegador, que funciona independentemente de como o app foi carregado:
+O proxy atual so aceita POST. Para que o hls.js possa buscar manifestos e segmentos de video atraves dele, precisa aceitar GET com a URL como parametro de query:
 
-```text
-// Em vez de:
-Capacitor.isNativePlatform()  // retorna false no WebView remoto
-
-// Usar:
-/android/i.test(navigator.userAgent)  // sempre funciona
+```
+GET /functions/v1/iptv-proxy?url=http://host/live/user/pass/123.m3u8
 ```
 
-### 2. Usar Intent URI para abrir player externo (VLC/MX Player)
+Tambem precisa retornar o Content-Type correto do servidor original (nao forcar `application/json`).
 
-Em vez de `window.open(url, '_system')` (que pode ser interceptado pelo WebView), usar o esquema `intent://` do Android que garante a abertura do player externo:
+### 2. Rotear o HlsPlayer pelo proxy na web
 
-```text
-intent://HOST/live/user/pass/id.ts#Intent;scheme=http;type=video/*;end
+Usar a opcao `xhrSetup` do hls.js para interceptar TODAS as requisicoes (manifesto .m3u8 + segmentos .ts) e redirecioná-las pelo proxy. Isso resolve CORS e mixed content de uma vez:
+
+```
+hls.js quer buscar: http://host/live/user/pass/123.m3u8
+xhrSetup intercepta e troca para: https://proxy/iptv-proxy?url=http%3A%2F%2Fhost%2F...
+Proxy busca o conteudo e retorna ao hls.js
 ```
 
-Isso abre o seletor de apps do Android mostrando VLC, MX Player, ou o player padrao do sistema para reproduzir o stream `.ts` diretamente, sem proxy, sem dependencia.
+### 3. Melhorar o fluxo Android com dupla opcao
 
-### 3. Fallback com link clicavel
-
-Se o intent nao funcionar (alguns WebViews bloqueiam), criar um link `<a>` com a URL direta do stream `.ts` que o usuario pode tocar para abrir no player externo.
+No Android, ao clicar no canal:
+- Tentar abrir no player externo via intent (VLC/MX Player)  
+- Mostrar tambem o HlsPlayer inline como alternativa (com URL direta, que funciona no WebView com allowMixedContent)
+- Botao visivel "Abrir em player externo" caso o intent falhe silenciosamente
 
 ## Arquivos a modificar
 
-### `src/lib/native-player.ts`
-- Criar funcao `isAndroid()` baseada em `navigator.userAgent`
-- Implementar `playStream()` com Intent URI como metodo principal
-- Fallback para `window.open(url, '_system')` e depois `window.location.href`
-
-### `src/pages/LiveTvPage.tsx`
-- Substituir `Capacitor.isNativePlatform()` pela nova funcao `isAndroid()` do `native-player.ts`
-- Remover import do `Capacitor` (nao mais necessario nesta pagina)
-- No Android: sempre chamar `playStream()` com URL `.ts` direta (sem proxy)
-- Na web: manter HlsPlayer com `.m3u8`
-
-## Resultado esperado
-
-```text
-Fluxo corrigido no Android:
-  Click canal -> isAndroid() = TRUE (via userAgent)
-    -> playStream(http://host/live/user/pass/id.ts)
-    -> intent://host/live/user/pass/id.ts#Intent;scheme=http;type=video/*;end
-    -> Android app chooser -> VLC/MX Player reproduz .ts direto
-    -> Sem proxy, sem dependencia, conexao direta do celular
-
-Fluxo na Web (sem mudanca):
-  Click canal -> isAndroid() = FALSE
-    -> setActiveStream() -> HlsPlayer(.m3u8) via proxy
-```
+| Arquivo | Mudanca |
+|---------|---------|
+| `supabase/functions/iptv-proxy/index.ts` | Adicionar suporte GET com `?url=` e retornar Content-Type original |
+| `src/components/HlsPlayer.tsx` | Adicionar logica de proxy no `xhrSetup` do hls.js para rotear todas as requisicoes pela edge function quando na web |
+| `src/pages/LiveTvPage.tsx` | No Android: mostrar player inline + botao de player externo. Na web: passar flag para HlsPlayer usar proxy |
+| `src/lib/xtream-api.ts` | Atualizar `isNative()` para usar userAgent (consistente com native-player.ts) |
 
 ## Detalhes tecnicos
 
-A funcao `playStream` tera esta logica:
+### Proxy (edge function) - suporte GET
 
 ```text
-1. Detectar Android via navigator.userAgent
-2. Se Android:
-   a. Tentar abrir via intent:// URI (abre VLC/MX Player/player do sistema)
-   b. Se falhar, tentar window.open(url, '_system')
-   c. Se falhar, redirecionar via window.location.href
-3. Se iOS: window.open(url, '_blank') (iOS lida nativamente com video)
-4. Se Web: window.open(url, '_blank')
+GET ?url=encoded_url  ->  fetch(url) -> retorna body com Content-Type original
+POST {url}            ->  funciona como antes (retrocompativel)
 ```
 
-O Intent URI segue o padrao documentado pelo VLC (videolan.org):
-- scheme: http
-- type: video/*
-- data: URL completa do stream .ts
+O proxy passa o Content-Type original do servidor IPTV em vez de forcar `application/json`. Isso e necessario porque:
+- .m3u8 retorna `application/vnd.apple.mpegurl` ou `text/plain`
+- .ts retorna `video/mp2t`
+
+### HlsPlayer - proxy via xhrSetup
+
+```text
+Na web (nao-nativo):
+  hls.js config.xhrSetup = (xhr, url) => {
+    proxyUrl = PROXY_BASE + "?url=" + encodeURIComponent(url)
+    xhr.open("GET", proxyUrl, true)
+    xhr.setRequestHeader("apikey", ANON_KEY)
+  }
+
+No Android (nativo):
+  Sem proxy - URLs diretas funcionam no WebView
+```
+
+### LiveTvPage - fluxo Android melhorado
+
+```text
+Android:
+  Click canal ->
+    1. Abre HlsPlayer inline com URL .m3u8 direta (sem proxy)
+    2. Mostra botao "Abrir em VLC/MX Player" que dispara playStream()
+    3. Se HlsPlayer falhar, mostra erro com botao para player externo
+
+Web:
+  Click canal ->
+    1. Abre HlsPlayer inline com URL .m3u8 (proxy via xhrSetup)
+    2. Botao "Player Externo" disponivel nos controles
+```
+
+### isNative() em xtream-api.ts
+
+Trocar `(window as any).Capacitor` por deteccao via userAgent para consistencia:
+```text
+isNative() = isAndroid() || isIOS()  // via navigator.userAgent
+```
+
+## Resultado esperado
+
+- **Na web**: canais carregam e reproduzem via HlsPlayer, com todas as requisicoes passando pelo proxy (sem CORS, sem mixed content)
+- **No Android**: canais reproduzem inline no HlsPlayer (URL direta funciona no WebView) com opcao de abrir em player externo
+- **Sem erros silenciosos**: qualquer falha mostra mensagem com opcao de retry ou player externo
 
