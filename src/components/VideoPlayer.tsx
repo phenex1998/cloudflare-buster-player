@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Hls from 'hls.js';
-import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from 'lucide-react';
+import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX, Loader2, AlertCircle } from 'lucide-react';
 
 interface VideoPlayerProps {
   url: string;
@@ -16,18 +16,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
+    setIsLoading(true);
+    setError(null);
+
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
 
-    const isHls = url.includes('.m3u8') || url.includes('.m3u');
+    const isHls = url.includes('.m3u8') || url.includes('.m3u') || url.includes('/live/');
 
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -36,12 +41,52 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
       });
       hls.loadSource(url);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsLoading(false);
+        video.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.warn('HLS network error, attempting recovery...');
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.warn('HLS media error, attempting recovery...');
+              hls.recoverMediaError();
+              break;
+            default:
+              console.error('HLS fatal error, trying direct playback...');
+              hls.destroy();
+              hlsRef.current = null;
+              video.src = url;
+              video.play().catch(() => {
+                setError('Não foi possível reproduzir este canal');
+                setIsLoading(false);
+              });
+              break;
+          }
+        }
+      });
       hlsRef.current = hls;
+    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari native HLS
+      video.src = url;
+      video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
+      video.play().catch(() => {});
     } else {
       video.src = url;
+      video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
       video.play().catch(() => {});
     }
+
+    video.addEventListener('playing', () => { setIsLoading(false); setIsPlaying(true); });
+    video.addEventListener('waiting', () => setIsLoading(true));
+    video.addEventListener('error', () => {
+      setError('Erro ao carregar o stream');
+      setIsLoading(false);
+    });
 
     return () => {
       if (hlsRef.current) {
@@ -90,6 +135,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
       onTouchStart={handleInteraction}
     >
       <video ref={videoRef} className="w-full h-full" playsInline />
+
+      {/* Loading indicator */}
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+          <Loader2 className="w-10 h-10 text-white animate-spin" />
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-2">
+          <AlertCircle className="w-8 h-8 text-destructive" />
+          <p className="text-white text-sm">{error}</p>
+        </div>
+      )}
 
       {/* Overlay controls */}
       <div className={`absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
