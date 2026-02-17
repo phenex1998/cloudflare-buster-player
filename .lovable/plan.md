@@ -1,123 +1,55 @@
 
 
-# Corrigir Player Inline no Layout Split View (3 Colunas)
+# Corrigir Player Inline -- Usar HLS.js para Embedded, Plugin Nativo Apenas para Fullscreen
 
-## Problemas Identificados
+## Causa Raiz
 
-1. **`LiveTvSplitPage.tsx` linha 39**: Ainda usa extensao `'m3u8'` ao gerar a URL -- deveria ser `'ts'`
-2. **`InlinePlayer.tsx`**: Usa `<video>` HTML5 puro que nao consegue reproduzir streams `.ts` (MPEG-TS) sem um demuxer como HLS.js
-3. **Nenhuma integracao com Capacitor VideoPlayer no modo embedded**: O `InlinePlayer` nao usa o plugin nativo quando rodando no Android
+O plugin `@capgo/capacitor-video-player` documenta que o modo `embedded` funciona **apenas na Web**. No Android/iOS nativo, apenas o modo `fullscreen` e suportado. Por isso o player sempre abre em tela cheia no APK.
 
 ## Solucao
 
-### 1. `src/pages/LiveTvSplitPage.tsx`
-- Linha 39: Mudar `'m3u8'` para `'ts'`
+Usar **HLS.js** (ja instalado no projeto) com o elemento `<video>` HTML5 para reproduzir streams `.ts` inline na coluna da direita, em TODAS as plataformas. O plugin nativo Capacitor sera usado apenas quando o usuario clicar no botao "Expandir" para tela cheia.
 
-### 2. `src/components/InlinePlayer.tsx` -- Reescrever com suporte nativo embedded
+## Mudancas
 
-O componente sera atualizado para:
-- Detectar se esta rodando em plataforma nativa (Capacitor) ou web
-- **Nativo (Android)**: Usar `@capgo/capacitor-video-player` com `mode: 'embedded'` e `componentTag` apontando para o ID do container div
-- **Web**: Manter o `<video>` HTML5 como fallback (preview apenas)
-- Antes de iniciar um novo stream, chamar `stopAllPlayers()` para limpar o player anterior
-- Adicionar `console.log` da URL para debug
-- Container div com `id="embedded-player-container"` e dimensoes `w-full h-full`
-- Botao "Expandir" que no nativo chama `initPlayer` com `mode: 'fullscreen'`, e no web chama `requestFullscreen()`
+### `src/components/InlinePlayer.tsx` -- Reescrever logica de playback
 
-Fluxo ao trocar de canal:
+**Playback inline (coluna da direita):**
+- Sempre usar `<video>` HTML5 + HLS.js para reproduzir streams
+- HLS.js faz o demux de streams `.ts` e `.m3u8` que o `<video>` nao consegue sozinho
+- Funciona no WebView do Android (que e basicamente Chrome) e no browser
+- Ao trocar de canal: destruir instancia anterior do HLS.js (`hls.destroy()`) antes de criar nova
+
+**Botao "Expandir" (fullscreen):**
+- No Android nativo: chamar o plugin `@capgo/capacitor-video-player` com `mode: 'fullscreen'` (unico modo que funciona no nativo)
+- No Web: usar `videoRef.current.requestFullscreen()`
+
+**Fluxo detalhado:**
 ```text
-1. Usuario clica no canal (Coluna 3)
-2. activeStream muda -> useEffect dispara
-3. stopAllPlayers() limpa player anterior
-4. URL gerada com extensao .ts
-5. initPlayer({ mode: 'embedded', url, componentTag: 'embedded-player-container' })
-6. Video aparece na Coluna 4 imediatamente
+1. Usuario clica no canal
+2. URL muda -> useEffect dispara
+3. Se existe instancia HLS anterior -> hls.destroy()
+4. Cria nova instancia: new Hls()
+5. hls.loadSource(url)
+6. hls.attachMedia(videoElement)
+7. No evento MANIFEST_PARSED -> video.play()
+8. Se HLS nao suportado mas video nativo suporta -> video.src = url (fallback iOS Safari)
+9. Video aparece inline na coluna da direita
 ```
 
-### 3. Nenhuma mudanca necessaria em `MoviesSplitPage` e `SeriesSplitPage`
-- Esses ja usam a extensao correta (vem de `container_extension` do VOD/Series)
-- O `InlinePlayer` atualizado automaticamente beneficia essas paginas tambem
-
-## Detalhes Tecnicos
-
-### InlinePlayer -- logica principal
-
+**Botao Expandir:**
 ```text
-// Detectar plataforma
-const isNative = Capacitor.isNativePlatform();
-
-// useEffect quando URL muda:
-useEffect(() => {
-  if (!url) return;
-  
-  const cleanUrl = url.trim();
-  console.log('[InlinePlayer] URL:', cleanUrl);
-
-  if (isNative) {
-    // Importar dinamicamente o plugin
-    import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-      // Parar player anterior
-      VideoPlayer.stopAllPlayers().catch(() => {});
-      
-      // Iniciar novo player embedded
-      VideoPlayer.initPlayer({
-        mode: 'embedded',
-        url: cleanUrl,
-        playerId: 'embeddedPlayer',
-        componentTag: 'embedded-player-container',
-        title: title || 'Stream',
-        exitOnEnd: false,
-        loopOnEnd: false,
-        showControls: true,
-        displayMode: 'landscape',
-        chromecast: false,
-      });
-    });
-  } else {
-    // Web fallback com <video> HTML5
-    video.src = cleanUrl;
-    video.load();
-    video.play();
-  }
-
-  // Cleanup
-  return () => {
-    if (isNative) {
-      import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-        VideoPlayer.stopAllPlayers().catch(() => {});
-      });
-    }
-  };
-}, [url]);
+- Se isAndroid() -> VideoPlayer.initPlayer({ mode: 'fullscreen', url })
+- Senao -> videoRef.current.requestFullscreen()
 ```
 
-### Container div (dentro do JSX)
-```text
-<div id="embedded-player-container" className="w-full h-full" style={{ minHeight: '100%' }}>
-  {/* No web, renderiza <video>. No nativo, o plugin injeta o player aqui */}
-</div>
-```
-
-### Botao Expandir (fullscreen)
-```text
-// No nativo: abre fullscreen via plugin
-// No web: usa requestFullscreen() do elemento video
-handleFullscreen = () => {
-  if (isNative) {
-    VideoPlayer.initPlayer({ mode: 'fullscreen', url: currentUrl, ... });
-  } else {
-    videoRef.current?.requestFullscreen();
-  }
-};
-```
-
-## Arquivos Modificados
-1. `src/pages/LiveTvSplitPage.tsx` -- corrigir extensao `.ts` (1 linha)
-2. `src/components/InlinePlayer.tsx` -- reescrever com suporte nativo embedded + cleanup
+### Nenhuma mudanca em outros arquivos
+- `LiveTvSplitPage.tsx`, `MoviesSplitPage.tsx`, `SeriesSplitPage.tsx` permanecem iguais
+- A correcao e inteiramente no componente `InlinePlayer`
 
 ## Resultado Esperado
-- Ao clicar num canal na lista, o video aparece imediatamente na coluna da direita (sem mudar de pagina)
-- Trocar de canal limpa o player anterior e inicia o novo sem sobreposicao de audio
-- Botao "Expandir" permite tela cheia
-- No preview web, mostra o elemento `<video>` como fallback
+- Video toca inline na coluna da direita no APK Android (via WebView + HLS.js)
+- Trocar de canal destroi o player anterior e inicia novo sem sobreposicao de audio
+- Botao "Expandir" abre tela cheia nativa no Android via plugin Capacitor
+- No browser web, tudo funciona igual via HLS.js + requestFullscreen
 
