@@ -1,18 +1,22 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, Loader2, Maximize, Search, X, Heart, Radio } from 'lucide-react';
+import { ArrowLeft, Loader2, Search, X, Heart, Radio } from 'lucide-react';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import EpgSection from '@/components/EpgSection';
+import videojs from 'video.js';
+import 'video.js/dist/video-js.css';
+
+import type Player from 'video.js/dist/types/player';
 
 interface PlayerState {
   url: string;
   title?: string;
   streamId?: number;
+  isLive?: boolean;
 }
 
 const PlayerPage: React.FC = () => {
@@ -25,10 +29,10 @@ const PlayerPage: React.FC = () => {
     location.state as PlayerState | undefined
   );
   const [search, setSearch] = useState('');
-  const videoContainerRef = useRef<HTMLDivElement>(null);
-  const isNative = Capacitor.isNativePlatform();
+  const videoRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<Player | null>(null);
 
-  // Fetch categories & streams for the channel list below
+  // Fetch categories & streams for channel list
   const { data: categories = [] } = useQuery({
     queryKey: ['live-categories', credentials?.host],
     queryFn: () => xtreamApi.getLiveCategories(credentials!),
@@ -56,105 +60,100 @@ const PlayerPage: React.FC = () => {
     const entries = Array.from(categoryMap.values()).filter(e => e.streams.length > 0);
     if (!q) return entries;
     return entries
-      .map(e => ({
-        ...e,
-        streams: e.streams.filter(s => s.name.toLowerCase().includes(q)),
-      }))
+      .map(e => ({ ...e, streams: e.streams.filter(s => s.name.toLowerCase().includes(q)) }))
       .filter(e => e.streams.length > 0);
   }, [categoryMap, search]);
 
-  // Start / switch embedded player
-  const startPlayer = useCallback(async (streamState: PlayerState) => {
-    if (!isNative) {
-      setLoading(false);
-      setError('O player nativo só funciona no app Android. Use o APK instalado no dispositivo.');
+  // Determine source type
+  const getSourceType = (url: string, isLive?: boolean): string => {
+    if (isLive || url.includes('.m3u8')) return 'application/x-mpegURL';
+    if (url.includes('.mpd')) return 'application/dash+xml';
+    return 'video/mp4';
+  };
+
+  // Init or switch Video.js player
+  const initPlayer = useCallback((streamState: PlayerState) => {
+    setLoading(true);
+    setError(null);
+
+    const sourceType = getSourceType(streamState.url, streamState.isLive);
+
+    // If player already exists, just swap the source
+    if (playerRef.current) {
+      playerRef.current.src({ src: streamState.url, type: sourceType });
+      playerRef.current.play()?.catch(() => {});
       return;
     }
 
-    try {
-      setLoading(true);
-      setError(null);
+    // Create video element inside container
+    if (!videoRef.current) return;
+    const videoEl = document.createElement('video-js');
+    videoEl.classList.add('vjs-big-play-centered', 'vjs-fill');
+    videoRef.current.appendChild(videoEl);
 
-      const cleanUrl = streamState.url.trim();
-      console.log('[Player] Embedded URL:', cleanUrl);
+    const player = videojs(videoEl, {
+      autoplay: true,
+      controls: true,
+      responsive: true,
+      fluid: false,
+      liveui: !!streamState.isLive,
+      sources: [{ src: streamState.url, type: sourceType }],
+      html5: {
+        hls: {
+          overrideNative: true,
+          enableLowInitialPlaylist: true,
+        },
+        nativeAudioTracks: false,
+        nativeVideoTracks: false,
+      },
+    });
 
-      const { VideoPlayer } = await import('@capgo/capacitor-video-player');
+    player.on('playing', () => setLoading(false));
+    player.on('waiting', () => setLoading(true));
+    player.on('canplay', () => setLoading(false));
 
-      // Stop any previous player
-      await VideoPlayer.stopAllPlayers().catch(() => {});
-
-      // Get container dimensions
-      const container = videoContainerRef.current;
-      const width = container?.clientWidth || 360;
-      const height = container?.clientHeight || 250;
-
-      await VideoPlayer.initPlayer({
-        mode: 'embedded',
-        url: cleanUrl,
-        playerId: 'video-player-div',
-        componentTag: 'div',
-        title: streamState.title || 'Stream',
-        width,
-        height,
-        exitOnEnd: false,
-        loopOnEnd: false,
-        showControls: true,
-        chromecast: false,
-      });
-
+    player.on('error', () => {
+      const err = player.error();
+      console.error('[Video.js] Error:', err);
       setLoading(false);
-    } catch (err: any) {
-      console.error('Native player error:', err);
-      setLoading(false);
-      setError(err?.message || 'Erro ao iniciar o player nativo.');
-    }
-  }, [isNative]);
+      setError(`Erro de reprodução (código ${err?.code}). Tentando reconectar...`);
 
-  // Init player on mount or stream change
+      // Auto-retry after 3s
+      setTimeout(() => {
+        if (playerRef.current && currentStream) {
+          setError(null);
+          setLoading(true);
+          player.src({ src: currentStream.url, type: getSourceType(currentStream.url, currentStream.isLive) });
+          player.play()?.catch(() => {});
+        }
+      }, 3000);
+    });
+
+    playerRef.current = player;
+  }, []);
+
+  // Start / switch stream
   useEffect(() => {
     if (!currentStream?.url) return;
-    startPlayer(currentStream);
+    initPlayer(currentStream);
+  }, [currentStream?.url]);
 
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      if (isNative) {
-        import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-          VideoPlayer.stopAllPlayers().catch(() => {});
-        }).catch(() => {});
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
       }
     };
-  }, [currentStream?.url]);
+  }, []);
 
   // Switch channel
   const handlePlay = (stream: LiveStream) => {
     if (!credentials) return;
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
-    const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
-    setCurrentStream({ url, title: stream.name, streamId: stream.stream_id });
-  };
-
-  // Fullscreen toggle
-  const goFullscreen = async () => {
-    if (!isNative || !currentStream?.url) return;
-    try {
-      const { VideoPlayer } = await import('@capgo/capacitor-video-player');
-      await VideoPlayer.stopAllPlayers().catch(() => {});
-      await VideoPlayer.initPlayer({
-        mode: 'fullscreen',
-        url: currentStream.url.trim(),
-        playerId: 'iptvPlayer',
-        componentTag: 'div',
-        title: currentStream.title || 'Stream',
-        exitOnEnd: true,
-        loopOnEnd: false,
-        showControls: true,
-        displayMode: 'landscape',
-        chromecast: false,
-      });
-      // When fullscreen closes, restart embedded
-      startPlayer(currentStream);
-    } catch (err) {
-      console.error('Fullscreen error:', err);
-    }
+    const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+    setCurrentStream({ url, title: stream.name, streamId: stream.stream_id, isLive: true });
   };
 
   if (!currentStream?.url) {
@@ -168,52 +167,37 @@ const PlayerPage: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       {/* Top: Video Area */}
-      <div className="relative bg-black shrink-0" style={{ height: '35vh' }} ref={videoContainerRef}>
-        {/* Native plugin target div */}
-        <div id="video-player-div" className="w-full h-full" />
+      <div className="relative shrink-0" style={{ height: '35vh', background: '#000' }}>
+        {/* Video.js container */}
+        <div ref={videoRef} className="w-full h-full [&_.video-js]:w-full [&_.video-js]:h-full [&_video]:object-contain" />
 
-        {/* Overlay controls */}
-        <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/70 to-transparent p-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              onClick={() => {
-                if (isNative) {
-                  import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-                    VideoPlayer.stopAllPlayers().catch(() => {});
-                  }).catch(() => {});
-                }
-                navigate(-1);
-              }}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4 text-white" />
-            </button>
-            {currentStream.title && (
-              <h1 className="text-white text-xs font-medium truncate">{currentStream.title}</h1>
-            )}
-          </div>
+        {/* Header overlay */}
+        <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent p-3 flex items-center gap-2 pointer-events-auto">
           <button
-            onClick={goFullscreen}
+            onClick={() => navigate(-1)}
             className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
           >
-            <Maximize className="w-4 h-4 text-white" />
+            <ArrowLeft className="w-4 h-4 text-white" />
           </button>
+          {currentStream.title && (
+            <h1 className="text-white text-xs font-medium truncate">{currentStream.title}</h1>
+          )}
         </div>
 
         {/* Loading spinner */}
         {loading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center z-5">
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
             <Loader2 className="w-8 h-8 text-white animate-spin" />
           </div>
         )}
 
         {/* Error overlay */}
         {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-3 z-20">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-3 z-30">
             <p className="text-white/70 text-xs text-center px-6">{error}</p>
             <div className="flex gap-2">
               <button
-                onClick={() => currentStream && startPlayer(currentStream)}
+                onClick={() => currentStream && initPlayer(currentStream)}
                 className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs font-medium"
               >
                 Tentar novamente
@@ -231,14 +215,13 @@ const PlayerPage: React.FC = () => {
 
       {/* EPG for current channel */}
       {currentStream.streamId && (
-        <div className="px-4 pt-3">
+        <div className="px-4 pt-3 shrink-0">
           <EpgSection streamId={currentStream.streamId} channelName={currentStream.title || ''} />
         </div>
       )}
 
       {/* Bottom: Channel list */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Search */}
+      <div className="flex-1 overflow-y-auto min-h-0">
         <div className="px-4 pt-3 pb-2 sticky top-0 bg-background z-10">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -257,7 +240,6 @@ const PlayerPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Channel grid */}
         <div className="px-4 pb-6 space-y-5">
           {filteredCategories.length === 0 ? (
             <p className="text-center text-muted-foreground text-sm py-6">Nenhum canal encontrado.</p>
@@ -287,7 +269,6 @@ const PlayerPage: React.FC = () => {
                             LIVE
                           </Badge>
                         </div>
-
                         <button
                           onClick={e => {
                             e.stopPropagation();
@@ -297,7 +278,6 @@ const PlayerPage: React.FC = () => {
                         >
                           <Heart className={cn('w-2.5 h-2.5', isFavorite(stream.stream_id, 'live') ? 'fill-primary text-primary' : 'text-white/70')} />
                         </button>
-
                         <div className="w-full aspect-square flex items-center justify-center p-2 bg-muted/30">
                           {stream.stream_icon ? (
                             <img
@@ -311,7 +291,6 @@ const PlayerPage: React.FC = () => {
                             <Radio className="w-6 h-6 text-muted-foreground" />
                           )}
                         </div>
-
                         <div className="w-full px-1 py-1.5 bg-card">
                           <p className="text-[10px] font-medium text-foreground truncate text-center leading-tight">
                             {stream.name}
