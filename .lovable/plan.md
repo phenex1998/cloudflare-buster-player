@@ -1,14 +1,44 @@
 
+## Correções: Canais ao Vivo e Navegador Externo
 
-## Correcoes Criticas: Navegacao e Playback Android
+### Problema 1: Canais ao vivo não abrem
 
-### Problema 1: App abrindo navegador externo
+**Causa raiz:** A função `getLiveStreamUrl` ainda usa `.ts` como formato padrão (linha 214 do arquivo xtream-api.ts). A correção anterior para mudar para `.m3u8` não foi aplicada. O formato `.ts` não é suportado nativamente pelo WebView/navegador.
 
-O `capacitor.config.json` atual nao tem `allowNavigation`, entao o WebView do Android expulsa qualquer URL externa (streams IPTV) para o Chrome.
+**Correções:**
 
-**Correcao:** Adicionar `"allowNavigation": ["*"]` dentro do bloco `server` do `capacitor.config.json`.
+1. **Alterar `getLiveStreamUrl`** para usar `.m3u8` como extensão padrão em vez de `.ts`
+2. **Melhorar o VideoPlayer** com:
+   - Tratamento de erros do HLS (reconexão automática em caso de falha)
+   - Suporte a URLs sem extensão `.m3u8` (tratar todas as URLs de live como HLS)
+   - Estado visual de loading/erro para o usuário saber o que está acontecendo
 
-Resultado:
+### Problema 2: Links abrindo no navegador externo
+
+**Causa raiz:** O WebView do Capacitor precisa de configurações adicionais para evitar que links HTTP externos (como as URLs dos streams IPTV) sejam interceptados pelo sistema e abertos no Chrome/navegador padrão.
+
+**Correções no `capacitor.config.json`:**
+- Adicionar `"androidScheme": "https"` para que o WebView use HTTPS como esquema padrão
+- Adicionar `"allowMixedContent": true` no bloco `android` para permitir conteúdo HTTP dentro do HTTPS (necessário para servidores IPTV que usam HTTP)
+
+---
+
+### Detalhes Tecnicos
+
+#### 1. `src/lib/xtream-api.ts`
+- Mudar `getLiveStreamUrl` de `ext = 'ts'` para `ext = 'm3u8'`
+
+#### 2. `src/components/VideoPlayer.tsx`
+- Adicionar tratamento de erros HLS com reconexão automática (`Hls.Events.ERROR`)
+- Tratar URLs de live (sem extensão .m3u8) forçando uso do HLS.js
+- Adicionar estado de loading e erro visual
+- Adicionar fallback: se HLS falhar, tentar carregar direto no elemento video
+
+#### 3. `capacitor.config.json`
+- Adicionar `"androidScheme": "https"`
+- Adicionar bloco `"android"` com `"allowMixedContent": true`
+
+Resultado final do capacitor.config.json:
 ```json
 {
   "appId": "app.lovable.c4e021b328bd442aa81dcccc0857c716",
@@ -20,42 +50,13 @@ Resultado:
   },
   "server": {
     "url": "https://c4e021b3-28bd-442a-a81d-cccc0857c716.lovableproject.com?forceHideBadge=true",
-    "cleartext": true,
-    "allowNavigation": ["*"]
+    "cleartext": true
   }
 }
 ```
 
----
+### Passos após implementação
 
-### Problema 2: Canais ao vivo (.ts) nao reproduzem
-
-O player ja usa HLS.js, mas a logica atual tenta converter `.ts` para `.m3u8` e quando falha, tenta playback direto do `.ts` -- que o WebView Android nao suporta nativamente.
-
-**Correcao:** Forcar **todas** as URLs de live a passarem pelo HLS.js usando MSE (Media Source Extensions), mesmo URLs `.ts` diretas. O HLS.js suporta carregar segmentos `.ts` individuais quando configurado corretamente.
-
-Mudancas no `src/components/VideoPlayer.tsx`:
-- Para URLs `/live/` com `.ts`, alimentar o HLS.js diretamente com a URL `.ts` (ele consegue processar segmentos MPEG-TS via MSE)
-- Remover o fallback `tryDirectPlayback` para live streams (nao funciona no Android)
-- Adicionar configuracao `xhrSetup` no HLS.js para garantir que requisicoes passem corretamente
-- Manter fallback direto apenas para VOD (que ja funciona)
-
----
-
-### Detalhes Tecnicos
-
-#### 1. `capacitor.config.json`
-- Adicionar `"allowNavigation": ["*"]` no bloco `server`
-
-#### 2. `src/components/VideoPlayer.tsx`
-- Para live streams: sempre usar HLS.js com a URL `.m3u8` (convertida de `.ts`)
-- Se `.m3u8` falhar via HLS.js, tentar criar um manifesto HLS sintetico em memoria apontando para o `.ts` e carrega-lo via `hls.loadSource(blob:...)`
-- Isso forca o HLS.js a decodificar o `.ts` via MSE, que o WebView Android suporta
-- Adicionar timeout de 10s para deteccao de erro em vez de esperar indefinidamente
-
-### Passos apos implementacao
-
-1. `git pull`
-2. `npx cap sync`
-3. `npx cap run android`
-
+1. Fazer `git pull` do projeto
+2. Rodar `npx cap sync`
+3. Rodar `npx cap run android`

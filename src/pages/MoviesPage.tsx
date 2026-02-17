@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
-import VideoPlayerModal from '@/components/VideoPlayerModal';
+import VideoPlayer from '@/components/VideoPlayer';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Film } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -34,13 +34,13 @@ const MoviesPage: React.FC = () => {
     <div className="min-h-screen bg-background pb-20">
       <AppHeader title="Filmes" />
 
-      {/* Modal player overlay */}
       {activeMovie && credentials && (
-        <VideoPlayerModal
-          url={xtreamApi.getVodStreamUrl(credentials, activeMovie.stream_id, activeMovie.container_extension || 'mp4')}
-          title={activeMovie.name}
-          onClose={() => setActiveMovie(null)}
-        />
+        <div className="sticky top-[57px] z-20">
+          <VideoPlayer
+            url={xtreamApi.getVodStreamUrl(credentials, activeMovie.stream_id, activeMovie.container_extension || 'mp4')}
+            title={activeMovie.name}
+          />
+        </div>
       )}
 
       {/* Categories */}
