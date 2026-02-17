@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { IptvProvider, useIptv } from "@/contexts/IptvContext";
 import LoginPage from "@/pages/LoginPage";
 import LiveTvPage from "@/pages/LiveTvPage";
@@ -42,6 +42,9 @@ function AuthenticatedRoutes() {
     return <LoginPage />;
   }
 
+  const loc = useLocation();
+  const hideNav = loc.pathname === '/player';
+
   return (
     <>
       <Routes>
@@ -56,7 +59,7 @@ function AuthenticatedRoutes() {
         <Route path="/player" element={<PlayerPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <BottomNav />
+      {!hideNav && <BottomNav />}
     </>
   );
 }
