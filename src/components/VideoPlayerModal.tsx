@@ -26,15 +26,9 @@ const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ url, title, onClose
     videoElement.classList.add('vjs-big-play-centered', 'vjs-fill');
     videoContainerRef.current.appendChild(videoElement);
 
-    // Determine source type: force HLS for live/.ts/.m3u8 streams
+    // Determine source type
     const isHlsLike = url.includes('/live/') || /\.(m3u8?|m3u|ts)(\?.*)?$/i.test(url);
     const sourceType = isHlsLike ? 'application/x-mpegURL' : 'video/mp4';
-
-    // For .ts URLs in live context, convert to .m3u8
-    let sourceUrl = url;
-    if (url.includes('/live/') && /\.ts(\?.*)?$/.test(url)) {
-      sourceUrl = url.replace(/\.ts(\?.*)?$/, '.m3u8$1');
-    }
 
     const player = videojs(videoElement, {
       autoplay: true,
@@ -45,31 +39,25 @@ const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({ url, title, onClose
       preload: 'auto',
       html5: {
         vhs: {
-          overrideNative: true,
+          overrideNative: false,
         },
-        nativeAudioTracks: false,
-        nativeVideoTracks: false,
+        nativeAudioTracks: true,
+        nativeVideoTracks: true,
       },
       sources: [{
-        src: sourceUrl,
+        src: url,
         type: sourceType,
       }],
     });
 
     player.ready(() => {
-      console.log('[VideoPlayerModal] Video.js ready, source:', sourceUrl, 'type:', sourceType);
+      console.log('[VideoPlayerModal] Video.js ready, source:', url, 'type:', sourceType);
     });
 
     // If .m3u8 fails for a live .ts URL, try direct .ts with forced type
     player.on('error', () => {
       const error = player.error();
       console.warn('[VideoPlayerModal] Playback error:', error);
-
-      if (sourceUrl !== url && isHlsLike) {
-        console.log('[VideoPlayerModal] Retrying with original .ts URL');
-        player.src({ src: url, type: 'application/x-mpegURL' });
-        player.play();
-      }
     });
 
     playerRef.current = player;
