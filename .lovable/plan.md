@@ -1,74 +1,78 @@
 
-
-# Trocar HLS.js por Player Nativo do video HTML5
+# Adicionar Debug Visivel e Botao de Teste ao PlayerPage
 
 ## Resumo
 
-Remover completamente o HLS.js e usar o elemento `<video>` nativo do navegador para reproduzir streams. No preview web, a URL passa pelo proxy (iptv-proxy) para resolver CORS. No APK nativo, usa URL direta (zero latencia).
+Atualizar o `src/pages/PlayerPage.tsx` para incluir um painel de debug visivel na tela (sem depender do console), um botao "Forcar Reproducao", um botao de teste com HLS publico, e um timeout de 10 segundos. Isso vai ajudar a diagnosticar por que o spinner nao para no WebView Android.
 
-## Mudancas
+## Mudancas no arquivo `src/pages/PlayerPage.tsx`
 
-### 1. `src/pages/PlayerPage.tsx` - Reescrita do player
+### 1. Adicionar estado para armazenar a URL resolvida
 
-**Remover:**
-- `import Hls from 'hls.js'`
-- Toda logica de `new Hls()`, `hls.loadSource`, `hls.attachMedia`, `hls.on`, `hlsRef`
-- Referencia `Hls.isSupported()`, `Hls.Events`, `Hls.ErrorTypes`
+Novo state `resolvedUrl` para exibir no painel de debug:
 
-**Manter/Ajustar:**
-- Import do Capacitor (ja existe)
-- `PROXY_BASE` e `resolveUrl` (ja existem e funcionam corretamente)
-- `videoRef`, `loading`, `error` states
-- Header overlay com botao voltar e titulo
-- Container 35vh
+```typescript
+const [resolvedUrl, setResolvedUrl] = useState<string>('');
+```
 
-**Novo useEffect simplificado:**
-- Pega `state.url`, faz trim
-- Chama `resolveUrl()` (proxy no web, direto no nativo)
-- Seta `video.src` diretamente
-- Chama `video.load()` e `video.play()`
-- Cleanup: `video.pause()` e limpa `video.src`
+### 2. Atualizar o useEffect
 
-**Video element atualizado:**
-- Adiciona `onError` handler com log
-- Adiciona `onLoadedMetadata` para setar loading=false
-- Mantem `playsInline`, `muted`, `autoPlay`, `controls`, `crossOrigin="anonymous"`
+- Guardar a URL resolvida no state para exibicao no debug panel
+- Aumentar timeout para 10 segundos
+- Mensagem de erro atualizada para mencionar "Forcar Reproducao"
 
-### 2. `capacitor.config.json`
-- Adicionar `"allowsInlineMediaPlayback": true` no bloco `ios`
+### 3. Substituir o overlay de loading atual
 
-### 3. Remover dependencia `hls.js`
-- Desinstalar o pacote hls.js do projeto
+Trocar o spinner simples (Loader2) pelo painel de debug completo com:
+- Spinner animado CSS
+- Texto "Carregando stream..."
+- Painel de debug mostrando: Plataforma, URL (truncada), ReadyState, NetworkState
+- Botao verde "FORCAR REPRODUCAO" que chama `video.play()` com alert em caso de erro
+
+### 4. Adicionar botao "Testar HLS Publico" no header
+
+Botao azul temporario ao lado do titulo que carrega `https://test-streams.mux.dev/x264/1080p.m3u8` diretamente no video element, permitindo testar se o problema e da URL ou do WebView.
+
+### 5. Atualizar handlers do video
+
+- Adicionar `onLoadStart` handler
+- Manter todos os handlers existentes (`onLoadedData`, `onLoadedMetadata`, `onCanPlay`, `onPlaying`, `onWaiting`, `onError`, `onStalled`)
 
 ## Detalhes tecnicos
 
-### Fluxo simplificado do PlayerPage
+### Estrutura final do componente
 
 ```text
 PlayerPage
+  |-- States: error, loading, resolvedUrl, videoRef
   |-- useEffect([state.url])
-  |     |-- streamUrl = state.url.trim()
-  |     |-- resolveUrl(streamUrl)
-  |     |       |-- SE nativo: retorna URL direta
-  |     |       |-- SE web: retorna proxy URL
-  |     |-- video.src = resolvedUrl
-  |     |-- video.load()
-  |     |-- video.play().catch(...)
-  |     |-- cleanup: video.pause(), video.src = ''
+  |     |-- setResolvedUrl(url)
+  |     |-- video.src = url
+  |     |-- video.load() + video.play()
+  |     |-- setTimeout(10s) -> force stop loading
   |
-  |-- Container 35vh inline
-        |-- Header overlay (voltar + titulo)
-        |-- Loading spinner
-        |-- <video> nativo com controls
-        |-- Error overlay
+  |-- Container 35vh
+        |-- Header overlay
+        |     |-- Botao voltar
+        |     |-- Titulo
+        |     |-- Botao "Testar HLS Publico" (azul, temporario)
+        |
+        |-- <video> com todos os handlers
+        |
+        |-- Loading overlay (z-50, quando loading=true)
+        |     |-- Spinner CSS
+        |     |-- "Carregando stream..."
+        |     |-- Debug panel (plataforma, URL, readyState, networkState)
+        |     |-- Botao "FORCAR REPRODUCAO" (verde)
+        |
+        |-- Error overlay (quando error != null)
 ```
 
-### Por que funciona sem HLS.js
+### O que esse debug vai revelar
 
-- **No APK (Android/iOS)**: O WebView nativo suporta HLS nativamente via ExoPlayer/AVPlayer, entao `<video src="...m3u8">` funciona direto
-- **No Safari (iOS web)**: Safari suporta HLS nativamente no elemento `<video>`
-- **No Chrome web (preview)**: O proxy converte a resposta e adiciona headers CORS; Chrome consegue reproduzir o stream via proxy
-
-### Nota importante
-O `PROXY_BASE` continuara usando `VITE_SUPABASE_URL` que ja existe no `.env`, nao precisa de variavel nova. A funcao `resolveUrl` ja existente faz exatamente o que e necessario.
-
+- **ReadyState 0**: video nao recebeu nada (URL invalida ou CORS)
+- **ReadyState 1**: metadata recebida mas sem dados
+- **ReadyState 2+**: dados chegando, problema e no autoplay
+- **NetworkState 3**: erro de rede (URL inacessivel)
+- Botao "Testar HLS Publico" isola se o problema e do WebView ou da URL do IPTV
+- Botao "Forcar Reproducao" testa se o problema e restricao de autoplay
