@@ -1,77 +1,61 @@
 
 
-## Correcao: Canais ao Vivo Nao Reproduzem
+## Correcoes Criticas: Navegacao e Playback Android
 
-### Causa Raiz
+### Problema 1: App abrindo navegador externo
 
-O problema principal e que as URLs dos streams de video (ex: `http://servidor/live/user/pass/123.ts`) sao carregadas **diretamente** pelo elemento `<video>` e pelo HLS.js. Diferente das chamadas de API (que passam pelo proxy), essas URLs vao direto para o servidor IPTV, que **bloqueia por CORS** no navegador/WebView.
+O `capacitor.config.json` atual nao tem `allowNavigation`, entao o WebView do Android expulsa qualquer URL externa (streams IPTV) para o Chrome.
 
-Alem disso, o proxy atual so aceita requisicoes POST com JSON, mas o HLS.js precisa fazer requisicoes GET para buscar playlists `.m3u8` e segmentos `.ts`.
+**Correcao:** Adicionar `"allowNavigation": ["*"]` dentro do bloco `server` do `capacitor.config.json`.
 
-### Solucao
+Resultado:
+```json
+{
+  "appId": "app.lovable.c4e021b328bd442aa81dcccc0857c716",
+  "appName": "IPTV Player",
+  "webDir": "dist",
+  "androidScheme": "https",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "url": "https://c4e021b3-28bd-442a-a81d-cccc0857c716.lovableproject.com?forceHideBadge=true",
+    "cleartext": true,
+    "allowNavigation": ["*"]
+  }
+}
+```
 
-Criar um proxy de streaming que suporte GET e passe o conteudo com o content-type correto, e fazer o VideoPlayer rotear todas as URLs pelo proxy quando estiver em modo web.
+---
+
+### Problema 2: Canais ao vivo (.ts) nao reproduzem
+
+O player ja usa HLS.js, mas a logica atual tenta converter `.ts` para `.m3u8` e quando falha, tenta playback direto do `.ts` -- que o WebView Android nao suporta nativamente.
+
+**Correcao:** Forcar **todas** as URLs de live a passarem pelo HLS.js usando MSE (Media Source Extensions), mesmo URLs `.ts` diretas. O HLS.js suporta carregar segmentos `.ts` individuais quando configurado corretamente.
+
+Mudancas no `src/components/VideoPlayer.tsx`:
+- Para URLs `/live/` com `.ts`, alimentar o HLS.js diretamente com a URL `.ts` (ele consegue processar segmentos MPEG-TS via MSE)
+- Remover o fallback `tryDirectPlayback` para live streams (nao funciona no Android)
+- Adicionar configuracao `xhrSetup` no HLS.js para garantir que requisicoes passem corretamente
+- Manter fallback direto apenas para VOD (que ja funciona)
 
 ---
 
 ### Detalhes Tecnicos
 
-#### 1. Atualizar `supabase/functions/iptv-proxy/index.ts`
+#### 1. `capacitor.config.json`
+- Adicionar `"allowNavigation": ["*"]` no bloco `server`
 
-Adicionar suporte a requisicoes GET com a URL do stream como query parameter:
-- `GET /iptv-proxy?url=http://servidor/live/user/pass/123.m3u8`
-- Passar o `Content-Type` original da resposta (text/plain para .m3u8, video/mp2t para .ts)
-- Manter o suporte POST existente para as chamadas de API
-
-#### 2. Atualizar `src/lib/xtream-api.ts`
-
-Adicionar funcao `proxyStreamUrl(url)` que:
-- No modo nativo (Capacitor): retorna a URL original (sem CORS no WebView nativo)
-- No modo web: retorna a URL do proxy GET com a URL do stream codificada como query param
-
-Exportar essa funcao para uso no VideoPlayer e nas paginas.
-
-#### 3. Atualizar `src/pages/LiveTvPage.tsx`
-
-Usar `proxyStreamUrl()` ao passar a URL para o VideoPlayer, garantindo que no modo web a URL passe pelo proxy.
-
-#### 4. Atualizar `src/components/VideoPlayer.tsx`
-
-- Corrigir vazamento de memoria: remover event listeners (`playing`, `waiting`, `error`) no cleanup do useEffect
-- Melhorar a logica de deteccao HLS para funcionar com URLs do proxy (que contem a URL original como query param)
-- Adicionar mais logs de debug para facilitar diagnostico futuro
-
-#### 5. Verificar `src/pages/MoviesPage.tsx` e `src/pages/SeriesDetailPage.tsx`
-
-Aplicar o mesmo `proxyStreamUrl()` para VOD e series, garantindo consistencia.
-
-### Fluxo apos correcao
-
-```text
-Usuario clica em canal
-       |
-       v
-LiveTvPage gera URL do stream (.ts)
-       |
-       v
-proxyStreamUrl() envolve com proxy (web) ou mantem original (nativo)
-       |
-       v
-VideoPlayer recebe URL
-       |
-       v
-Detecta /live/ -> tenta .m3u8 via HLS.js (pelo proxy)
-       |
-   Sucesso? -> Reproduz via HLS
-       |
-   Falha? -> Tenta .ts direto (pelo proxy)
-       |
-   Falha? -> Mostra erro visual
-```
+#### 2. `src/components/VideoPlayer.tsx`
+- Para live streams: sempre usar HLS.js com a URL `.m3u8` (convertida de `.ts`)
+- Se `.m3u8` falhar via HLS.js, tentar criar um manifesto HLS sintetico em memoria apontando para o `.ts` e carrega-lo via `hls.loadSource(blob:...)`
+- Isso forca o HLS.js a decodificar o `.ts` via MSE, que o WebView Android suporta
+- Adicionar timeout de 10s para deteccao de erro em vez de esperar indefinidamente
 
 ### Passos apos implementacao
 
-1. Fazer `git pull` do projeto
-2. Rodar `npx cap sync`
-3. Rodar `npx cap run android`
+1. `git pull`
+2. `npx cap sync`
+3. `npx cap run android`
 
