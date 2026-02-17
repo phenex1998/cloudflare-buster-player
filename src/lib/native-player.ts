@@ -1,7 +1,7 @@
 /**
- * Platform detection and native video player utilities.
- * Uses User Agent detection instead of Capacitor.isNativePlatform()
- * because the latter returns false when loading from a remote URL.
+ * Android-only native video player via Intent.
+ * Opens streams in external players (VLC, MX Player, Just Player, etc.)
+ * using ExoPlayer — same approach as XCIPTV.
  */
 
 export function isAndroid(): boolean {
@@ -17,31 +17,32 @@ export function isMobile(): boolean {
 }
 
 /**
- * Opens a video stream in an external player (VLC, MX Player, etc.).
- * On Android: uses intent:// URI to launch the system app chooser.
- * On iOS/Web: opens in a new tab (system handles video natively).
+ * Opens a video stream via Android Intent (ExoPlayer/VLC/MX Player).
+ * Falls back to window.open and then direct navigation.
  */
-export function playStream(url: string, _title?: string): void {
+export function playStream(url: string, title?: string): void {
   if (isAndroid()) {
-    // Build Android Intent URI to open in external video player
-    // Format: intent://HOST/path#Intent;scheme=http;type=video/*;end
+    // Build Android Intent URI for external video player
     const stripped = url.replace(/^https?:\/\//, '');
     const scheme = url.startsWith('https') ? 'https' : 'http';
-    const intentUrl = `intent://${stripped}#Intent;scheme=${scheme};type=video/*;end`;
+
+    let intentUrl = `intent://${stripped}#Intent;scheme=${scheme};type=video/*`;
+    if (title) {
+      intentUrl += `;S.title=${encodeURIComponent(title)}`;
+    }
+    intentUrl += ';end';
 
     try {
       window.location.href = intentUrl;
     } catch {
-      // Fallback: try _system open
       try {
         window.open(url, '_system');
       } catch {
-        // Last resort: direct navigation
         window.location.href = url;
       }
     }
   } else {
-    // iOS & Web: open in new tab, system handles video
+    // Fallback for non-Android
     window.open(url, '_blank');
   }
 }

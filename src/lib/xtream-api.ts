@@ -1,4 +1,4 @@
-// Xtream Codes API Service
+// Xtream Codes API Service — Direct fetch (Android WebView, no CORS)
 
 export interface XtreamCredentials {
   host: string;
@@ -140,35 +140,11 @@ function apiUrl(creds: XtreamCredentials, action?: string): string {
   return url;
 }
 
-// Detect if running inside Capacitor native app
-function isNative(): boolean {
-  return !!(window as any).Capacitor;
-}
-
-// Fetch via proxy (web) or direct (native)
+// Direct fetch — Android WebView has no CORS restrictions
 async function fetchApi<T>(url: string): Promise<T> {
-  if (isNative()) {
-    // Native: direct fetch (no CORS issues)
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
-    return res.json();
-  } else {
-    // Web: route through edge function proxy to bypass CORS
-    const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
-    const res = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-      },
-      body: JSON.stringify({ url }),
-    });
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      throw new Error(`Proxy error: ${res.status} ${res.statusText} ${errorBody}`);
-    }
-    return res.json();
-  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+  return res.json();
 }
 
 export const xtreamApi = {
