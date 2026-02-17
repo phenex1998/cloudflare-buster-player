@@ -1,62 +1,38 @@
 
-## Correções: Canais ao Vivo e Navegador Externo
 
-### Problema 1: Canais ao vivo não abrem
+# Corrigir reprodução de canais ao vivo no Android
 
-**Causa raiz:** A função `getLiveStreamUrl` ainda usa `.ts` como formato padrão (linha 214 do arquivo xtream-api.ts). A correção anterior para mudar para `.m3u8` não foi aplicada. O formato `.ts` não é suportado nativamente pelo WebView/navegador.
+## Problema
+Quando você clica em um canal, a página abre o **HlsPlayer** (player web) com URL `.m3u8`. No Android, esse player trava infinitamente porque o WebView não consegue reproduzir streams IPTV de forma confiável.
 
-**Correções:**
+A função `playStream()` que usa o **ExoPlayer nativo** (via capacitor-video-player) nunca é chamada na tela de Live TV.
 
-1. **Alterar `getLiveStreamUrl`** para usar `.m3u8` como extensão padrão em vez de `.ts`
-2. **Melhorar o VideoPlayer** com:
-   - Tratamento de erros do HLS (reconexão automática em caso de falha)
-   - Suporte a URLs sem extensão `.m3u8` (tratar todas as URLs de live como HLS)
-   - Estado visual de loading/erro para o usuário saber o que está acontecendo
+## Solução
+Ao clicar num canal no Android, chamar diretamente o **player nativo** (ExoPlayer) com a URL `.ts`. No navegador web, manter o HlsPlayer atual como fallback.
 
-### Problema 2: Links abrindo no navegador externo
+## Mudancas
 
-**Causa raiz:** O WebView do Capacitor precisa de configurações adicionais para evitar que links HTTP externos (como as URLs dos streams IPTV) sejam interceptados pelo sistema e abertos no Chrome/navegador padrão.
+### 1. `src/pages/LiveTvPage.tsx`
+- Importar `playStream` de `@/lib/native-player` e `Capacitor` de `@capacitor/core`
+- Alterar `handlePlay()`:
+  - Se estiver no Android/iOS (nativo): chamar `playStream(url_ts, nome)` diretamente -- abre em tela cheia nativa via ExoPlayer
+  - Se estiver na web: manter o comportamento atual (abrir HlsPlayer embutido com `.m3u8`)
+- Gerar a URL com extensao `.ts` para o player nativo
 
-**Correções no `capacitor.config.json`:**
-- Adicionar `"androidScheme": "https"` para que o WebView use HTTPS como esquema padrão
-- Adicionar `"allowMixedContent": true` no bloco `android` para permitir conteúdo HTTP dentro do HTTPS (necessário para servidores IPTV que usam HTTP)
+### 2. `src/lib/native-player.ts`
+- Nenhuma mudanca necessaria, a funcao `playStream` ja esta pronta
 
----
+## Resultado esperado
+- No celular Android: clicar no canal abre imediatamente o ExoPlayer em tela cheia com o stream `.ts`
+- No navegador web: continua funcionando com o HlsPlayer embutido
 
-### Detalhes Tecnicos
+## Detalhes tecnicos
 
-#### 1. `src/lib/xtream-api.ts`
-- Mudar `getLiveStreamUrl` de `ext = 'ts'` para `ext = 'm3u8'`
+```text
+Fluxo no Android:
+  Click canal -> handlePlay() -> detecta nativo -> playStream(url.ts) -> ExoPlayer fullscreen
 
-#### 2. `src/components/VideoPlayer.tsx`
-- Adicionar tratamento de erros HLS com reconexão automática (`Hls.Events.ERROR`)
-- Tratar URLs de live (sem extensão .m3u8) forçando uso do HLS.js
-- Adicionar estado de loading e erro visual
-- Adicionar fallback: se HLS falhar, tentar carregar direto no elemento video
-
-#### 3. `capacitor.config.json`
-- Adicionar `"androidScheme": "https"`
-- Adicionar bloco `"android"` com `"allowMixedContent": true`
-
-Resultado final do capacitor.config.json:
-```json
-{
-  "appId": "app.lovable.c4e021b328bd442aa81dcccc0857c716",
-  "appName": "IPTV Player",
-  "webDir": "dist",
-  "androidScheme": "https",
-  "android": {
-    "allowMixedContent": true
-  },
-  "server": {
-    "url": "https://c4e021b3-28bd-442a-a81d-cccc0857c716.lovableproject.com?forceHideBadge=true",
-    "cleartext": true
-  }
-}
+Fluxo na Web:
+  Click canal -> handlePlay() -> detecta web -> setActiveStream() -> HlsPlayer(.m3u8)
 ```
 
-### Passos após implementação
-
-1. Fazer `git pull` do projeto
-2. Rodar `npx cap sync`
-3. Rodar `npx cap run android`
