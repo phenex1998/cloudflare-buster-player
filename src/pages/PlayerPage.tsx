@@ -29,7 +29,7 @@ const PlayerPage: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
-  // Fetch categories & streams for channel list
+  // Memoized categories and streams (Sem alterações aqui, sua lógica estava boa)
   const { data: categories = [] } = useQuery({
     queryKey: ['live-categories', credentials?.host],
     queryFn: () => xtreamApi.getLiveCategories(credentials!),
@@ -61,33 +61,35 @@ const PlayerPage: React.FC = () => {
       .filter(e => e.streams.length > 0);
   }, [categoryMap, search]);
 
-  // Init or switch HLS player
+  // FUNÇÃO DE INICIALIZAÇÃO CORRIGIDA
   const initPlayer = useCallback((streamState: PlayerState) => {
+    const video = videoRef.current;
+    if (!video || !streamState.url) return;
+
     setLoading(true);
     setError(null);
 
-    const video = videoRef.current;
-    if (!video) return;
-
-    // Destroy previous HLS instance
+    // Limpeza profunda de instâncias anteriores
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
 
-    // Force inline attributes
-    video.setAttribute('playsinline', '');
-    video.setAttribute('webkit-playsinline', '');
-    video.muted = true;
-    video.controls = true;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
 
     const url = streamState.url;
-    const isHls = url.includes('.m3u8') || streamState.isLive;
-
-    if (isHls && Hls.isSupported()) {
+    
+    // Configuração robusta para IPTV (HLS)
+    if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
+        backBufferLength: 60,
+        maxBufferLength: 30,
+        manifestLoadingMaxRetry: 5,
+        levelLoadingMaxRetry: 5,
         xhrSetup: (xhr) => {
           xhr.withCredentials = false;
         },
@@ -98,66 +100,52 @@ const PlayerPage: React.FC = () => {
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setLoading(false);
-        video.play().catch(() => {});
+        video.play().catch(e => console.error("Autoplay preventivo:", e));
       });
 
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        console.error('[HLS] Error:', data);
+      hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          setLoading(false);
-          setError(`Erro de reprodução HLS (${data.type}). Tentando reconectar...`);
-          setTimeout(() => {
-            if (hlsRef.current) {
-              setError(null);
-              setLoading(true);
-              hls.loadSource(url);
-            }
-          }, 3000);
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            default:
+              setError("Erro fatal de reprodução. Tente outro canal.");
+              hls.destroy();
+              break;
+          }
         }
       });
 
       hlsRef.current = hls;
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS (Safari/iOS)
+    } 
+    // Suporte Nativo (iOS/Safari)
+    else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
       video.addEventListener('loadedmetadata', () => {
         setLoading(false);
         video.play().catch(() => {});
       }, { once: true });
-    } else {
-      // Fallback for non-HLS URLs
-      video.src = url;
-      video.addEventListener('loadeddata', () => {
-        setLoading(false);
-        video.play().catch(() => {});
-      }, { once: true });
     }
-
-    video.addEventListener('waiting', () => setLoading(true));
-    video.addEventListener('playing', () => setLoading(false));
-    video.addEventListener('error', () => {
-      setLoading(false);
-      setError('Erro ao reproduzir o vídeo.');
-    });
   }, []);
 
-  // Start / switch stream
   useEffect(() => {
-    if (!currentStream?.url) return;
-    initPlayer(currentStream);
-  }, [currentStream?.url]);
+    if (currentStream?.url) {
+      initPlayer(currentStream);
+    }
+  }, [currentStream?.url, initPlayer]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
-        hlsRef.current = null;
       }
     };
   }, []);
 
-  // Switch channel
   const handlePlay = (stream: LiveStream) => {
     if (!credentials) return;
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
@@ -165,153 +153,104 @@ const PlayerPage: React.FC = () => {
     setCurrentStream({ url, title: stream.name, streamId: stream.stream_id, isLive: true });
   };
 
-  if (!currentStream?.url) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-muted-foreground">Nenhum stream selecionado.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Top: Video Area */}
-      <div className="relative shrink-0 w-full" style={{ aspectRatio: '16/9', minHeight: '220px', maxHeight: '40vh', background: '#000' }}>
-        {/* HLS Video element */}
-        <video ref={videoRef} className="w-full h-full object-contain" playsInline muted controls />
+      {/* AREA DO VIDEO FIXA NO TOPO */}
+      <div className="relative w-full bg-black shrink-0" style={{ height: '35vh', minHeight: '220px' }}>
+        <video 
+          ref={videoRef} 
+          className="w-full h-full object-contain z-0" 
+          playsInline 
+          webkit-playsinline="true"
+          muted 
+          autoPlay
+          controls
+          crossOrigin="anonymous"
+        />
 
-        {/* Header overlay */}
-        <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent p-3 flex items-center gap-2 pointer-events-auto">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4 text-white" />
-          </button>
-          {currentStream.title && (
-            <h1 className="text-white text-xs font-medium truncate">{currentStream.title}</h1>
+        {/* Overlay de carregamento e erro */}
+        <div className="absolute inset-0 pointer-events-none z-10">
+          {loading && !error && (
+            <div className="w-full h-full flex items-center justify-center bg-black/20">
+              <Loader2 className="w-8 h-8 text-white animate-spin" />
+            </div>
+          )}
+          {error && (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-black/90 pointer-events-auto gap-3">
+              <p className="text-white/70 text-xs px-6 text-center">{error}</p>
+              <button 
+                onClick={() => currentStream && initPlayer(currentStream)}
+                className="bg-primary text-white px-4 py-2 rounded-lg text-xs"
+              >
+                Tentar Novamente
+              </button>
+            </div>
           )}
         </div>
 
-        {/* Loading spinner */}
-        {loading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-            <Loader2 className="w-8 h-8 text-white animate-spin" />
-          </div>
-        )}
-
-        {/* Error overlay */}
-        {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-3 z-30">
-            <p className="text-white/70 text-xs text-center px-6">{error}</p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => currentStream && initPlayer(currentStream)}
-                className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs font-medium"
-              >
-                Tentar novamente
-              </button>
-              <button
-                onClick={() => navigate(-1)}
-                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium"
-              >
-                Voltar
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Header Overlay */}
+        <div className="absolute top-0 left-0 right-0 p-3 bg-gradient-to-b from-black/80 to-transparent flex items-center gap-3 z-20">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-full bg-white/10 text-white">
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <span className="text-white text-xs font-bold truncate">{currentStream?.title}</span>
+        </div>
       </div>
 
-      {/* EPG for current channel */}
-      {currentStream.streamId && (
-        <div className="px-4 pt-3 shrink-0">
-          <EpgSection streamId={currentStream.streamId} channelName={currentStream.title || ''} />
-        </div>
-      )}
+      {/* EPG E LISTA - AREA SCROLLAVEL */}
+      <div className="flex-1 overflow-y-auto bg-background">
+        {currentStream?.streamId && (
+          <div className="px-4 py-3 border-b border-border/50">
+            <EpgSection streamId={currentStream.streamId} channelName={currentStream.title || ''} />
+          </div>
+        )}
 
-      {/* Bottom: Channel list */}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="px-4 pt-3 pb-2 sticky top-0 bg-background z-10">
-          <div className="relative">
+        <div className="p-4">
+          <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Buscar canais..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-9 pr-9 py-2 rounded-xl bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full pl-10 pr-4 py-2 bg-card border border-border rounded-xl text-sm"
             />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            )}
           </div>
-        </div>
 
-        <div className="px-4 pb-6 space-y-5">
-          {filteredCategories.length === 0 ? (
-            <p className="text-center text-muted-foreground text-sm py-6">Nenhum canal encontrado.</p>
-          ) : (
-            filteredCategories.map(({ category, streams }) => (
+          <div className="space-y-6">
+            {filteredCategories.map(({ category, streams }) => (
               <section key={category.category_id}>
-                <h2 className="text-xs font-bold text-foreground tracking-wide uppercase mb-2">
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 px-1">
                   {category.category_name}
-                </h2>
-                <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2">
-                  {streams.map(stream => {
-                    const isActive = currentStream.streamId === stream.stream_id;
-                    return (
-                      <button
-                        key={stream.stream_id}
-                        onClick={() => handlePlay(stream)}
-                        className={cn(
-                          'group relative flex flex-col items-center rounded-lg overflow-hidden transition-all',
-                          'bg-card border hover:shadow-md',
-                          isActive
-                            ? 'border-primary ring-1 ring-primary shadow-md shadow-primary/10'
-                            : 'border-border hover:border-primary/40'
+                </h3>
+                <div className="grid grid-cols-4 gap-2">
+                  {streams.map(stream => (
+                    <button
+                      key={stream.stream_id}
+                      onClick={() => handlePlay(stream)}
+                      className={cn(
+                        "flex flex-col items-center p-2 rounded-xl border transition-all",
+                        currentStream?.streamId === stream.stream_id 
+                          ? "bg-primary/10 border-primary" 
+                          : "bg-card border-transparent"
+                      )}
+                    >
+                      <div className="w-full aspect-square bg-muted/20 rounded-lg flex items-center justify-center mb-1.5 overflow-hidden">
+                        {stream.stream_icon ? (
+                          <img src={stream.stream_icon} className="w-full h-full object-contain p-1" alt="" />
+                        ) : (
+                          <Radio className="w-5 h-5 text-muted-foreground/50" />
                         )}
-                      >
-                        <div className="absolute top-1 left-1 z-10">
-                          <Badge variant="destructive" className="px-1 py-0 text-[8px] leading-3 font-bold rounded-sm">
-                            LIVE
-                          </Badge>
-                        </div>
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            toggleFavorite({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
-                          }}
-                          className="absolute top-1 right-1 z-10 p-0.5 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Heart className={cn('w-2.5 h-2.5', isFavorite(stream.stream_id, 'live') ? 'fill-primary text-primary' : 'text-white/70')} />
-                        </button>
-                        <div className="w-full aspect-square flex items-center justify-center p-2 bg-muted/30">
-                          {stream.stream_icon ? (
-                            <img
-                              src={stream.stream_icon}
-                              alt={stream.name}
-                              className="max-w-full max-h-full object-contain"
-                              loading="lazy"
-                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                            />
-                          ) : (
-                            <Radio className="w-6 h-6 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div className="w-full px-1 py-1.5 bg-card">
-                          <p className="text-[10px] font-medium text-foreground truncate text-center leading-tight">
-                            {stream.name}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
+                      </div>
+                      <span className="text-[9px] font-medium truncate w-full text-center">
+                        {stream.name}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </section>
-            ))
-          )}
+            ))}
+          </div>
         </div>
       </div>
     </div>
