@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import Hls from 'hls.js';
+import mpegts from 'mpegts.js';
 import { Maximize, Heart, Radio } from 'lucide-react';
 import { useIptv } from '@/contexts/IptvContext';
 import { cn } from '@/lib/utils';
@@ -23,7 +23,7 @@ function getProxiedUrl(url: string): string {
 
 const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, streamType = 'live', streamIcon }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  const playerRef = useRef<mpegts.Player | null>(null);
   const { toggleFavorite, isFavorite } = useIptv();
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
 
@@ -31,9 +31,17 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
     const video = videoRef.current;
     if (!video) return;
 
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
+    // Destroy previous player
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+        playerRef.current.unload();
+        playerRef.current.detachMediaElement();
+        playerRef.current.destroy();
+      } catch (e) {
+        console.warn('[InlinePlayer] cleanup error:', e);
+      }
+      playerRef.current = null;
     }
 
     if (!url) {
@@ -49,46 +57,50 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
     const playUrl = getProxiedUrl(cleanUrl);
     console.log('[InlinePlayer] Loading:', cleanUrl, native ? '(direct)' : '(proxied)');
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({
+    // Try mpegts.js first for .ts streams
+    const isTsStream = cleanUrl.toLowerCase().endsWith('.ts') || streamType === 'live';
+
+    if (isTsStream && mpegts.isSupported()) {
+      const player = mpegts.createPlayer({
+        type: 'mpegts',
+        isLive: streamType === 'live',
+        url: playUrl,
+      }, {
         enableWorker: true,
-        lowLatencyMode: true,
-        xhrSetup: native ? undefined : (xhr, reqUrl) => {
-          const proxied = getProxiedUrl(reqUrl);
-          xhr.open('GET', proxied, true);
-        },
+        liveBufferLatencyChasing: streamType === 'live',
+        liveBufferLatencyMaxLatency: 1.5,
+        liveBufferLatencyMinRemain: 0.3,
       });
-      hlsRef.current = hls;
-      hls.loadSource(native ? cleanUrl : playUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {});
+
+      playerRef.current = player;
+      player.attachMediaElement(video);
+      player.load();
+      const playResult = player.play();
+      if (playResult && typeof playResult.catch === 'function') {
+        playResult.catch(() => {});
+      }
+
+      player.on(mpegts.Events.ERROR, (errorType: string, errorDetail: string) => {
+        console.warn('[InlinePlayer] mpegts error:', errorType, errorDetail);
       });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        console.warn('[InlinePlayer] HLS error:', data.type, data.details);
-        if (data.fatal) {
-          console.log('[InlinePlayer] Fatal HLS error, trying direct src');
-          hls.destroy();
-          hlsRef.current = null;
-          video.src = playUrl;
-          video.load();
-          video.play().catch(() => {});
-        }
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = playUrl;
-      video.load();
-      video.play().catch(() => {});
     } else {
+      // Fallback: direct src for VOD (.mp4, .mkv, etc.) or unsupported browsers
       video.src = playUrl;
       video.load();
       video.play().catch(() => {});
     }
 
     return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+      if (playerRef.current) {
+        try {
+          playerRef.current.pause();
+          playerRef.current.unload();
+          playerRef.current.detachMediaElement();
+          playerRef.current.destroy();
+        } catch (e) {
+          console.warn('[InlinePlayer] unmount cleanup error:', e);
+        }
+        playerRef.current = null;
       }
     };
   }, [url]);
@@ -111,7 +123,7 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
     } else {
       videoRef.current?.requestFullscreen?.();
     }
-  }, [native, currentUrl, title]);
+  }, [currentUrl, title]);
 
   const fav = streamId !== undefined && isFavorite(streamId, streamType);
 
