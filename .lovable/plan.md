@@ -1,43 +1,40 @@
 
 
-# Corrigir configuracao Video.js v8: `hls` para `vhs`
+# Corrigir reprodução inline do player de vídeo
 
 ## Problema
-O Video.js v8 usa o namespace `vhs` (Video.js HTTP Streaming) em vez de `hls` para configuracao do motor de streaming. A configuracao atual usa `hls`, que e ignorada silenciosamente, fazendo o player cair no modo nativo do Android (que falha com streams HTTP/HLS).
+Em dispositivos móveis (iOS e alguns Android), o vídeo pode ser forçado para fullscreen automaticamente ao iniciar a reprodução, impedindo o layout Split View de funcionar corretamente.
 
-## Alteracoes no arquivo `src/pages/PlayerPage.tsx`
+## Alterações em `src/pages/PlayerPage.tsx`
 
-### 1. Corrigir o objeto de configuracao html5 (linhas 101-108)
+### 1. Adicionar `playsinline: true` nas opções do Video.js (linha 94-110)
+Incluir a propriedade `playsinline: true` no objeto de configuração passado ao `videojs()`. Isso faz o Video.js adicionar automaticamente os atributos `playsinline` e `webkit-playsinline` na tag `<video>`.
 
-Substituir:
 ```text
-html5: {
-  hls: {
-    overrideNative: true,
-    enableLowInitialPlaylist: true,
-  },
-  nativeAudioTracks: false,
-  nativeVideoTracks: false,
-},
+const player = videojs(videoEl, {
+  autoplay: true,
+  controls: true,
+  responsive: true,
+  fluid: false,
+  playsinline: true,       // <-- NOVO
+  liveui: !!streamState.isLive,
+  sources: [...],
+  html5: { ... },
+});
 ```
 
-Por:
+### 2. Adicionar `min-height` no container de vídeo (linha 171)
+Alterar o style do container para incluir `minHeight: '250px'`, garantindo que o player nunca fique invisível em telas muito pequenas.
+
 ```text
-html5: {
-  vhs: {
-    overrideNative: true,
-    enableLowInitialPlaylist: true,
-    useDevicePixelRatio: true,
-  },
-  nativeAudioTracks: false,
-  nativeVideoTracks: false,
-},
+<div className="relative shrink-0" style={{ height: '35vh', minHeight: '250px', background: '#000' }}>
 ```
 
-### 2. Classes CSS no elemento video (linha 90-91)
-
-As classes `vjs-big-play-centered` e `vjs-fill` ja estao presentes no codigo atual (linha 91), entao nenhuma alteracao e necessaria neste ponto.
+## O que NÃO precisa mudar
+- `object-fit: contain` já está aplicado via CSS no container
+- Não existe nenhum `requestFullscreen()` automático no código
+- O container pai já usa `display: flex`
+- Não há `visibility: hidden` em nenhum estado
 
 ## Resumo
-
-Uma unica alteracao cirurgica: trocar `hls` por `vhs` e adicionar `useDevicePixelRatio: true` na configuracao do player. As classes CSS ja estao corretas.
+Duas alterações cirúrgicas: adicionar `playsinline: true` na config do Video.js e `minHeight: '250px'` no container.
