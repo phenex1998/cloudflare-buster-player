@@ -1,7 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Hls from 'hls.js';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
+import { isAndroid } from '@/lib/native-player';
+
+const PROXY_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
+const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+/** On web (preview), route requests through proxy to avoid CORS/mixed-content. On Android WebView, use direct URLs. */
+function proxyUrl(url: string): string {
+  if (isAndroid()) return url;
+  return `${PROXY_BASE}?url=${encodeURIComponent(url)}`;
+}
 
 interface PlayerState {
   url: string;
@@ -14,6 +24,7 @@ const PlayerPage: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const state = location.state as PlayerState | undefined;
 
   useEffect(() => {
@@ -21,37 +32,69 @@ const PlayerPage: React.FC = () => {
 
     const video = videoRef.current;
     const url = state.url;
-    const isHls = url.includes('.m3u8') || url.includes('/live/');
+    const isHlsStream = url.includes('.m3u8') || url.includes('/live/');
+    const onAndroid = isAndroid();
 
-    if (isHls && Hls.isSupported()) {
+    if (isHlsStream && Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: true,
+        enableWorker: false,
         lowLatencyMode: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        ...(onAndroid
+          ? {}
+          : {
+              // On web, proxy all XHR requests through edge function
+              xhrSetup: (xhr: XMLHttpRequest, requestUrl: string) => {
+                const proxied = proxyUrl(requestUrl);
+                xhr.open('GET', proxied, true);
+                xhr.setRequestHeader('apikey', ANON_KEY);
+              },
+            }),
       });
+
       hlsRef.current = hls;
-      hls.loadSource(url);
+      hls.loadSource(onAndroid ? url : proxyUrl(url));
       hls.attachMedia(video);
+
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setLoading(false);
         video.play().catch(() => {});
       });
+
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
-          setError('Erro ao carregar o stream. Verifique a conexão.');
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              // Try to recover once
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            default:
+              setLoading(false);
+              setError('Erro ao carregar o stream. Verifique sua conexão.');
+              break;
+          }
         }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS support (Safari / some WebViews)
-      video.src = url;
+      // Native HLS (Safari / some WebViews)
+      video.src = onAndroid ? url : proxyUrl(url);
       video.addEventListener('loadedmetadata', () => {
+        setLoading(false);
         video.play().catch(() => {});
       });
     } else {
-      // Direct playback for mp4, mkv, etc.
-      video.src = url;
+      // Direct playback (mp4, mkv, etc.)
+      video.src = onAndroid ? url : proxyUrl(url);
       video.addEventListener('loadedmetadata', () => {
+        setLoading(false);
         video.play().catch(() => {});
       });
       video.addEventListener('error', () => {
+        setLoading(false);
         setError('Formato não suportado ou URL inválida.');
       });
     }
@@ -87,6 +130,13 @@ const PlayerPage: React.FC = () => {
         )}
       </div>
 
+      {/* Loading */}
+      {loading && !error && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+          <Loader2 className="w-10 h-10 text-white animate-spin" />
+        </div>
+      )}
+
       {/* Video */}
       <video
         ref={videoRef}
@@ -100,12 +150,25 @@ const PlayerPage: React.FC = () => {
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 gap-4">
           <p className="text-white/70 text-sm text-center px-8">{error}</p>
-          <button
-            onClick={() => navigate(-1)}
-            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium"
-          >
-            Voltar
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                // Re-trigger by remounting
+                window.location.reload();
+              }}
+              className="px-4 py-2 rounded-lg bg-white/10 text-white text-sm font-medium"
+            >
+              Tentar novamente
+            </button>
+            <button
+              onClick={() => navigate(-1)}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium"
+            >
+              Voltar
+            </button>
+          </div>
         </div>
       )}
     </div>
