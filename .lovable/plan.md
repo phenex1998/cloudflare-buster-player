@@ -1,81 +1,41 @@
 
-# Corrigir "video URL not found" no Player Nativo
 
-## Problema identificado
+# Corrigir Player Fechando Imediatamente
 
-Dois problemas causam o erro:
+## Problema
 
-1. **LiveTvPage usa extensao `.m3u8`** (linha 55) -- o plugin `@capgo/capacitor-video-player` tem dificuldade com URLs `.m3u8` de servidores IPTV Xtream. O correto para canais ao vivo e usar `.ts` (stream direto) que o ExoPlayer nativo reproduz sem problemas.
-
-2. **O plugin `@capgo/capacitor-video-player` valida a URL internamente** e rejeita URLs que nao passam na validacao dele (erro "video URL not found"). Isso acontece porque o plugin espera URLs com extensoes de video conhecidas ou protocolos especificos.
+No `PlayerPage.tsx` (linhas 53-56), apos `VideoPlayer.initPlayer()` resolver, o codigo executa `navigate(-1)`. No modo `fullscreen`, o `initPlayer` so resolve quando o player nativo fecha. Porem, no modo `embedded`, a promise resolve imediatamente apos iniciar a reproducao, causando a navegacao de volta e fazendo parecer que "abre e fecha".
 
 ## Solucao
 
-### 1. `src/pages/LiveTvPage.tsx`
-- Alterar a extensao de `'m3u8'` para `'ts'` na chamada `getLiveStreamUrl`
+Remover o `navigate(-1)` automatico apos `initPlayer` resolver. A navegacao de volta deve ser feita apenas pelo botao de voltar manual que ja existe na interface. Tambem ajustar o `setLoading(false)` para indicar que o player iniciou com sucesso.
 
-### 2. `src/pages/PlayerPage.tsx`
-- Adicionar log da URL antes de iniciar o player para debug
-- Garantir que a URL nao tenha espacos ou caracteres invalidos (trim)
-- Mudar o `playerId` para `'iptvPlayer'` e `componentTag` para `'div'` (mais compativel)
-- Adicionar tratamento especifico para o erro "video URL not found" com mensagem mais clara
-- Garantir que URLs HTTP funcionem adicionando `subtitle: ''` e removendo opcoes que podem causar conflito
+## Alteracoes
 
-### 3. `capacitor.config.json`
-- Adicionar `"allowNavigation": ["*"]` para permitir carregamento de URLs externas HTTP no WebView
+### `src/pages/PlayerPage.tsx`
 
-## Detalhes tecnicos
+Dentro do bloco `if (isNative)` no `useEffect`:
 
-### LiveTvPage - correcao da extensao
+**Antes:**
 ```text
-// ANTES (linha 55):
-const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'm3u8');
+await VideoPlayer.initPlayer({ ... });
 
-// DEPOIS:
-const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
-```
-
-### PlayerPage - inicializacao robusta do plugin
-```text
-// Limpar URL
-const cleanUrl = state.url.trim();
-console.log('[Player] URL:', cleanUrl);
-
-// initPlayer com parametros minimos e compativeis
-await VideoPlayer.initPlayer({
-  mode: 'fullscreen',
-  url: cleanUrl,
-  playerId: 'iptvPlayer',
-  componentTag: 'div',
-  title: state.title || 'Stream',
-  exitOnEnd: true,
-  loopOnEnd: false,
-  showControls: true,
-  displayMode: 'landscape',
-  chromecast: false,
-});
-```
-
-### capacitor.config.json - permitir navegacao externa
-```text
-{
-  "appId": "...",
-  "appName": "IPTV Player",
-  "webDir": "dist",
-  "androidScheme": "http",
-  "android": {
-    "allowMixedContent": true
-  },
-  "server": {
-    "allowNavigation": ["*"],
-    "cleartext": true
-  }
+// initPlayer resolves when the native player closes
+if (!cancelled) {
+  navigate(-1);
 }
 ```
 
-## Resultado esperado
+**Depois:**
+```text
+await VideoPlayer.initPlayer({ ... });
 
-- Canais ao vivo: URL `.ts` direta reproduzida pelo ExoPlayer nativo em tela cheia
-- Filmes (VOD): URL com extensao original (`.mp4`, `.mkv`) reproduzida pelo ExoPlayer
-- Series: URL com extensao original reproduzida pelo ExoPlayer
-- Sem erros de "video URL not found"
+// Em modo embedded, initPlayer resolve imediatamente
+// A navegacao de volta e feita pelo botao manual
+if (!cancelled) {
+  setLoading(false);
+}
+```
+
+Nenhuma outra alteracao. A logica de reproducao, parametros do plugin e configuracoes do Capacitor permanecem intactas.
+
