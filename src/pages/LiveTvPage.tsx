@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Capacitor } from '@capacitor/core';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
+import { playStream } from '@/lib/native-player';
 import HlsPlayer from '@/components/HlsPlayer';
 import EpgSection from '@/components/EpgSection';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -51,8 +53,16 @@ const LiveTvPage: React.FC = () => {
   }, [categoryMap, search]);
 
   const handlePlay = (stream: LiveStream) => {
-    setActiveStream(stream);
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
+
+    if (Capacitor.isNativePlatform() && credentials) {
+      // Android/iOS: open native ExoPlayer with .ts URL
+      const tsUrl = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
+      playStream(tsUrl, stream.name);
+    } else {
+      // Web: use embedded HlsPlayer with .m3u8
+      setActiveStream(stream);
+    }
   };
 
   const streamUrl = activeStream && credentials
