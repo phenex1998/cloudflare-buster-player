@@ -211,7 +211,7 @@ export const xtreamApi = {
   getFullEpg: (creds: XtreamCredentials, streamId: number) =>
     fetchApi<{ epg_listings: EpgListing[] }>(apiUrl(creds, 'get_simple_data_table') + `&stream_id=${streamId}`),
 
-  getLiveStreamUrl: (creds: XtreamCredentials, streamId: number, ext = 'ts') =>
+  getLiveStreamUrl: (creds: XtreamCredentials, streamId: number, ext = 'm3u8') =>
     `${baseUrl(creds)}/live/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${streamId}.${ext}`,
 
   getVodStreamUrl: (creds: XtreamCredentials, streamId: number, ext: string) =>
