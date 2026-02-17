@@ -96,6 +96,7 @@ const PlayerPage: React.FC = () => {
       controls: true,
       responsive: true,
       fluid: false,
+      playsinline: true,
       liveui: !!streamState.isLive,
       sources: [{ src: streamState.url, type: sourceType }],
       html5: {
@@ -168,7 +169,7 @@ const PlayerPage: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       {/* Top: Video Area */}
-      <div className="relative shrink-0" style={{ height: '35vh', background: '#000' }}>
+      <div className="relative shrink-0" style={{ height: '35vh', minHeight: '250px', background: '#000' }}>
         {/* Video.js container */}
         <div ref={videoRef} className="w-full h-full [&_.video-js]:w-full [&_.video-js]:h-full [&_video]:object-contain" />
 
