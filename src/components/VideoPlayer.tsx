@@ -32,50 +32,68 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
       hlsRef.current = null;
     }
 
-    const isHls = url.includes('.m3u8') || url.includes('.m3u') || url.includes('/live/');
+    // Try HLS version of the URL first (replace .ts with .m3u8 for live streams)
+    const isLiveTs = url.includes('/live/') && url.endsWith('.ts');
+    const hlsUrl = isLiveTs ? url.replace(/\.ts$/, '.m3u8') : url;
+    const isHls = hlsUrl.includes('.m3u8') || hlsUrl.includes('.m3u') || (url.includes('/live/') && !url.endsWith('.ts'));
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-      });
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsLoading(false);
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              console.warn('HLS network error, attempting recovery...');
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              console.warn('HLS media error, attempting recovery...');
-              hls.recoverMediaError();
-              break;
-            default:
-              console.error('HLS fatal error, trying direct playback...');
-              hls.destroy();
-              hlsRef.current = null;
-              video.src = url;
-              video.play().catch(() => {
-                setError('Não foi possível reproduzir este canal');
-                setIsLoading(false);
-              });
-              break;
-          }
-        }
-      });
-      hlsRef.current = hls;
-    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari native HLS
+    const tryDirectPlayback = () => {
+      // Fallback: play .ts URL directly
       video.src = url;
-      video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
-      video.play().catch(() => {});
+      video.play().catch(() => {
+        setError('Não foi possível reproduzir este canal');
+        setIsLoading(false);
+      });
+    };
+
+    if (isHls || isLiveTs) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        hls.loadSource(isLiveTs ? hlsUrl : url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setIsLoading(false);
+          video.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                if (isLiveTs) {
+                  // HLS .m3u8 failed, try direct .ts playback
+                  console.warn('HLS .m3u8 failed, trying direct .ts playback...');
+                  hls.destroy();
+                  hlsRef.current = null;
+                  tryDirectPlayback();
+                } else {
+                  hls.startLoad();
+                }
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                hls.destroy();
+                hlsRef.current = null;
+                tryDirectPlayback();
+                break;
+            }
+          }
+        });
+        hlsRef.current = hls;
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = isLiveTs ? hlsUrl : url;
+        video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
+        video.play().catch(() => {});
+      } else {
+        // No HLS support, try direct
+        tryDirectPlayback();
+      }
     } else {
+      // Non-live stream (VOD, series) - play directly
       video.src = url;
       video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
       video.play().catch(() => {});
@@ -136,14 +154,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
     >
       <video ref={videoRef} className="w-full h-full" playsInline />
 
-      {/* Loading indicator */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
           <Loader2 className="w-10 h-10 text-white animate-spin" />
         </div>
       )}
 
-      {/* Error state */}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-2">
           <AlertCircle className="w-8 h-8 text-destructive" />
@@ -151,7 +167,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
         </div>
       )}
 
-      {/* Overlay controls */}
       <div className={`absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         {title && (
           <div className="absolute top-0 left-0 right-0 p-3">
