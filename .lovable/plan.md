@@ -1,72 +1,90 @@
 
 
-# Corrigir reprodução de canais no Android e remover proxy nativo
+# Corrigir reprodução de canais ao vivo no Android
 
-## Diagnóstico
+## Causa raiz identificada
 
-O problema tem duas causas:
+O problema **NAO e o player em si** -- e que `Capacitor.isNativePlatform()` retorna `false` quando o app carrega de uma URL remota (preview do Lovable via `server.url`). Isso e um bug documentado do Capacitor. Como resultado, o codigo SEMPRE cai no caminho web (HlsPlayer com .m3u8), que trava no WebView do Android por problemas de CORS e mixed content.
 
-1. **O plugin `capacitor-video-player` esta falhando silenciosamente.** Ele depende de configuracao nativa especifica e sincronizacao perfeita (`npx cap sync`). Se o plugin nao estiver registrado corretamente no lado nativo, `initPlayer` falha e o catch apenas mostra um toast -- sem nenhum player abrindo.
+```text
+Fluxo atual (BUGADO):
+  Click canal -> Capacitor.isNativePlatform() = FALSE (bug!)
+    -> cai no else -> setActiveStream() -> HlsPlayer(.m3u8)
+    -> WebView tenta carregar .m3u8 -> CORS/mixed content -> loading infinito
+```
 
-2. **O app ja usa conexao direta no Android para chamadas de API** (a funcao `fetchApi` em `xtream-api.ts` detecta nativo e faz fetch direto). Porem, para reproducao de video, o plugin `capacitor-video-player` adiciona uma camada de complexidade desnecessaria.
+## Solucao
 
-## Sobre remover o proxy no Android
+### 1. Substituir deteccao de plataforma
 
-O proxy (edge function `iptv-proxy`) so e necessario na **web** por causa de CORS. No Android nativo:
-- Nao existe CORS no WebView/ExoPlayer
-- A conexao direta do celular ao servidor IPTV e mais rapida (menos latencia, sem intermediario)
-- O `fetchApi` ja faz isso para chamadas de API -- esta correto
-- Para streams de video, a URL `.ts` pode ser aberta diretamente pelo player nativo sem nenhum proxy
+Trocar `Capacitor.isNativePlatform()` por deteccao via **User Agent** do navegador, que funciona independentemente de como o app foi carregado:
 
-**Conclusao: remover o proxy para o Android e a abordagem correta e ja esta parcialmente implementada. So falta o player funcionar.**
+```text
+// Em vez de:
+Capacitor.isNativePlatform()  // retorna false no WebView remoto
 
-## Solucao proposta
+// Usar:
+/android/i.test(navigator.userAgent)  // sempre funciona
+```
 
-### 1. Substituir `capacitor-video-player` por Intent nativo (`src/lib/native-player.ts`)
+### 2. Usar Intent URI para abrir player externo (VLC/MX Player)
 
-Em vez de depender do plugin `capacitor-video-player` (que esta causando problemas), usar o **sistema de Intents do Android** para abrir o stream `.ts` diretamente em um player externo instalado no celular (VLC, MX Player, ou o player padrao do sistema).
+Em vez de `window.open(url, '_system')` (que pode ser interceptado pelo WebView), usar o esquema `intent://` do Android que garante a abertura do player externo:
 
-Isso sera feito com o plugin `@capacitor/app-launcher` ou simplesmente usando `window.open(url, '_system')` que o Capacitor automaticamente traduz para um Intent `ACTION_VIEW` no Android.
+```text
+intent://HOST/live/user/pass/id.ts#Intent;scheme=http;type=video/*;end
+```
 
-Nova implementacao de `native-player.ts`:
-- Remover import do `@capgo/capacitor-video-player`
-- Usar `window.open(url, '_system')` como metodo principal -- abre no player de video padrao do Android
-- Adicionar fallback para abrir no navegador do sistema
+Isso abre o seletor de apps do Android mostrando VLC, MX Player, ou o player padrao do sistema para reproduzir o stream `.ts` diretamente, sem proxy, sem dependencia.
 
-### 2. Manter HlsPlayer como fallback web (`src/pages/LiveTvPage.tsx`)
+### 3. Fallback com link clicavel
 
-- Sem mudancas no fluxo: Android usa player externo, Web usa HlsPlayer embutido
-- A logica condicional `Capacitor.isNativePlatform()` ja esta correta
-
-### 3. Limpar dependencias
-
-- Remover `@capgo/capacitor-video-player` do `build.rollupOptions.external` em `vite.config.ts` (nao sera mais necessario)
-- O import do plugin nao existira mais no codigo
+Se o intent nao funcionar (alguns WebViews bloqueiam), criar um link `<a>` com a URL direta do stream `.ts` que o usuario pode tocar para abrir no player externo.
 
 ## Arquivos a modificar
 
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/lib/native-player.ts` | Remover `capacitor-video-player`, usar `window.open(url, '_system')` para abrir no player nativo do Android |
-| `vite.config.ts` | Remover `@capgo/capacitor-video-player` do `rollupOptions.external` |
+### `src/lib/native-player.ts`
+- Criar funcao `isAndroid()` baseada em `navigator.userAgent`
+- Implementar `playStream()` com Intent URI como metodo principal
+- Fallback para `window.open(url, '_system')` e depois `window.location.href`
+
+### `src/pages/LiveTvPage.tsx`
+- Substituir `Capacitor.isNativePlatform()` pela nova funcao `isAndroid()` do `native-player.ts`
+- Remover import do `Capacitor` (nao mais necessario nesta pagina)
+- No Android: sempre chamar `playStream()` com URL `.ts` direta (sem proxy)
+- Na web: manter HlsPlayer com `.m3u8`
 
 ## Resultado esperado
 
-- Clicar em um canal no Android abre imediatamente o player de video instalado no celular (VLC, MX Player, player padrao) com o stream `.ts` direto
-- Sem proxy, sem intermediario -- conexao direta do celular ao servidor IPTV
-- Na web, continua funcionando com HlsPlayer embutido via proxy (necessario por causa de CORS)
+```text
+Fluxo corrigido no Android:
+  Click canal -> isAndroid() = TRUE (via userAgent)
+    -> playStream(http://host/live/user/pass/id.ts)
+    -> intent://host/live/user/pass/id.ts#Intent;scheme=http;type=video/*;end
+    -> Android app chooser -> VLC/MX Player reproduz .ts direto
+    -> Sem proxy, sem dependencia, conexao direta do celular
+
+Fluxo na Web (sem mudanca):
+  Click canal -> isAndroid() = FALSE
+    -> setActiveStream() -> HlsPlayer(.m3u8) via proxy
+```
 
 ## Detalhes tecnicos
 
-```text
-Android (nativo):
-  Click canal -> handlePlay() -> playStream(http://host/live/user/pass/id.ts)
-    -> window.open(url, '_system')
-    -> Android Intent ACTION_VIEW
-    -> Player externo (VLC/MX Player/padrao) reproduz o .ts direto
+A funcao `playStream` tera esta logica:
 
-Web (navegador):
-  Click canal -> handlePlay() -> setActiveStream()
-    -> HlsPlayer com .m3u8 via proxy (CORS)
+```text
+1. Detectar Android via navigator.userAgent
+2. Se Android:
+   a. Tentar abrir via intent:// URI (abre VLC/MX Player/player do sistema)
+   b. Se falhar, tentar window.open(url, '_system')
+   c. Se falhar, redirecionar via window.location.href
+3. Se iOS: window.open(url, '_blank') (iOS lida nativamente com video)
+4. Se Web: window.open(url, '_blank')
 ```
+
+O Intent URI segue o padrao documentado pelo VLC (videolan.org):
+- scheme: http
+- type: video/*
+- data: URL completa do stream .ts
 
