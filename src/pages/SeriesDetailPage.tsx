@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
-import { xtreamApi } from '@/lib/xtream-api';
+import { xtreamApi, proxyStreamUrl } from '@/lib/xtream-api';
 import VideoPlayer from '@/components/VideoPlayer';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Play } from 'lucide-react';
@@ -52,7 +52,7 @@ const SeriesDetailPage: React.FC = () => {
       {/* Player */}
       {activeEpisode && credentials && (
         <VideoPlayer
-          url={xtreamApi.getSeriesStreamUrl(credentials, activeEpisode.id, activeEpisode.ext)}
+          url={proxyStreamUrl(xtreamApi.getSeriesStreamUrl(credentials, activeEpisode.id, activeEpisode.ext))}
           title={activeEpisode.title}
         />
       )}
