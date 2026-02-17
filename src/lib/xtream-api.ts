@@ -141,15 +141,7 @@ function apiUrl(creds: XtreamCredentials, action?: string): string {
 }
 
 async function fetchApi<T>(url: string): Promise<T> {
-  const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
-  const res = await fetch(proxyUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    },
-    body: JSON.stringify({ url }),
-  });
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
