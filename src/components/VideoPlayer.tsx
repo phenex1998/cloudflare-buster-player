@@ -8,6 +8,16 @@ interface VideoPlayerProps {
   onBack?: () => void;
 }
 
+// Extract the original URL from a proxied URL for format detection
+function getOriginalUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const original = u.searchParams.get('url');
+    if (original) return original;
+  } catch {}
+  return url;
+}
+
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -32,13 +42,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
       hlsRef.current = null;
     }
 
-    // Try HLS version of the URL first (replace .ts with .m3u8 for live streams)
-    const isLiveTs = url.includes('/live/') && url.endsWith('.ts');
-    const hlsUrl = isLiveTs ? url.replace(/\.ts$/, '.m3u8') : url;
-    const isHls = hlsUrl.includes('.m3u8') || hlsUrl.includes('.m3u') || (url.includes('/live/') && !url.endsWith('.ts'));
+    const originalUrl = getOriginalUrl(url);
+    const isLive = originalUrl.includes('/live/');
+    const isHlsExt = originalUrl.includes('.m3u8') || originalUrl.includes('.m3u');
+    const isTsExt = originalUrl.endsWith('.ts');
+
+    // For live streams with .ts extension, build a .m3u8 proxy URL
+    const getM3u8Url = (): string => {
+      if (isLive && isTsExt) {
+        const m3u8Original = originalUrl.replace(/\.ts$/, '.m3u8');
+        // If the url is proxied, rebuild the proxy URL with .m3u8
+        if (url !== originalUrl) {
+          const u = new URL(url);
+          u.searchParams.set('url', m3u8Original);
+          return u.toString();
+        }
+        return m3u8Original;
+      }
+      return url;
+    };
 
     const tryDirectPlayback = () => {
-      // Fallback: play .ts URL directly
+      console.log('[VideoPlayer] Trying direct playback:', url);
       video.src = url;
       video.play().catch(() => {
         setError('Não foi possível reproduzir este canal');
@@ -46,13 +71,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
       });
     };
 
-    if (isHls || isLiveTs) {
+    const onPlaying = () => { setIsLoading(false); setIsPlaying(true); };
+    const onWaiting = () => setIsLoading(true);
+    const onError = () => { setError('Erro ao carregar o stream'); setIsLoading(false); };
+
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('error', onError);
+
+    if (isHlsExt || isLive) {
+      const hlsUrl = getM3u8Url();
+      console.log('[VideoPlayer] Attempting HLS playback:', hlsUrl);
+
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
         });
-        hls.loadSource(isLiveTs ? hlsUrl : url);
+        hls.loadSource(hlsUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setIsLoading(false);
@@ -60,53 +96,41 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, title }) => {
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                if (isLiveTs) {
-                  // HLS .m3u8 failed, try direct .ts playback
-                  console.warn('HLS .m3u8 failed, trying direct .ts playback...');
-                  hls.destroy();
-                  hlsRef.current = null;
-                  tryDirectPlayback();
-                } else {
-                  hls.startLoad();
-                }
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                hls.recoverMediaError();
-                break;
-              default:
-                hls.destroy();
-                hlsRef.current = null;
-                tryDirectPlayback();
-                break;
+            console.warn('[VideoPlayer] HLS fatal error:', data.type, data.details);
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && isLive && isTsExt) {
+              // .m3u8 failed, try direct .ts playback
+              hls.destroy();
+              hlsRef.current = null;
+              tryDirectPlayback();
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+            } else {
+              hls.destroy();
+              hlsRef.current = null;
+              tryDirectPlayback();
             }
           }
         });
         hlsRef.current = hls;
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = isLiveTs ? hlsUrl : url;
+        video.src = hlsUrl;
         video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
         video.play().catch(() => {});
       } else {
-        // No HLS support, try direct
         tryDirectPlayback();
       }
     } else {
-      // Non-live stream (VOD, series) - play directly
+      // VOD / series - play directly
+      console.log('[VideoPlayer] Direct playback (non-live):', url);
       video.src = url;
       video.addEventListener('loadedmetadata', () => setIsLoading(false), { once: true });
       video.play().catch(() => {});
     }
 
-    video.addEventListener('playing', () => { setIsLoading(false); setIsPlaying(true); });
-    video.addEventListener('waiting', () => setIsLoading(true));
-    video.addEventListener('error', () => {
-      setError('Erro ao carregar o stream');
-      setIsLoading(false);
-    });
-
     return () => {
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('error', onError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;

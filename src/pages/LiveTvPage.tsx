@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
-import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
+import { xtreamApi, proxyStreamUrl, LiveStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
 import VideoPlayer from '@/components/VideoPlayer';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -37,7 +37,7 @@ const LiveTvPage: React.FC = () => {
       {activeStream && credentials && (
         <div className="sticky top-[57px] z-20">
           <VideoPlayer
-            url={xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id)}
+            url={proxyStreamUrl(xtreamApi.getLiveStreamUrl(credentials, activeStream.stream_id))}
             title={activeStream.name}
           />
         </div>

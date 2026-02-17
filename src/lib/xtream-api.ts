@@ -145,6 +145,13 @@ function isNative(): boolean {
   return !!(window as any).Capacitor;
 }
 
+// Proxy a stream URL through the edge function (web only) to bypass CORS
+export function proxyStreamUrl(url: string): string {
+  if (isNative()) return url;
+  const proxyBase = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/iptv-proxy`;
+  return `${proxyBase}?url=${encodeURIComponent(url)}`;
+}
+
 // Fetch via proxy (web) or direct (native)
 async function fetchApi<T>(url: string): Promise<T> {
   if (isNative()) {
