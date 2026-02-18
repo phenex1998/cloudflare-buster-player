@@ -3,11 +3,40 @@ import { useNavigate } from 'react-router-dom';
 import { Tv, Film, MonitorPlay, Heart, Settings, User, Power, RefreshCw } from 'lucide-react';
 import { useIptv } from '@/contexts/IptvContext';
 import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+import { xtreamApi } from '@/lib/xtream-api';
+import { toast } from 'sonner';
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { authInfo, logout } = useIptv();
+  const { authInfo, credentials, logout } = useIptv();
+  const queryClient = useQueryClient();
   const [time, setTime] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (!credentials || isSyncing) return;
+    setIsSyncing(true);
+    toast('Sincronizando conteúdo com o servidor...');
+
+    try {
+      await Promise.all([
+        xtreamApi.getLiveCategories(credentials),
+        xtreamApi.getLiveStreams(credentials),
+        xtreamApi.getVodCategories(credentials),
+        xtreamApi.getVodStreams(credentials),
+        xtreamApi.getSeriesCategories(credentials),
+        xtreamApi.getSeries(credentials),
+      ]);
+
+      queryClient.removeQueries();
+      toast.success('Lista atualizada com sucesso!');
+    } catch {
+      toast.error('Falha ao sincronizar. Tente novamente.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   useEffect(() => {
     const update = () => {
@@ -49,8 +78,12 @@ const HomePage: React.FC = () => {
           <button className="w-9 h-9 rounded-lg bg-muted/40 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
             <User className="w-4 h-4" />
           </button>
-          <button className="w-9 h-9 rounded-lg bg-muted/40 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
-            <RefreshCw className="w-4 h-4" />
+          <button
+            onClick={handleRefresh}
+            disabled={isSyncing}
+            className="w-9 h-9 rounded-lg bg-muted/40 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={cn("w-4 h-4", isSyncing && "animate-spin")} />
           </button>
           <button
             onClick={logout}
