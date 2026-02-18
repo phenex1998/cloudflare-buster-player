@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, SeriesInfo, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Heart, MonitorPlay } from 'lucide-react';
+import { Heart, MonitorPlay, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { useInfiniteScroll } from '@/hooks/use-infinite-scroll';
 
 const SeriesPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite } = useIptv();
@@ -24,6 +25,8 @@ const SeriesPage: React.FC = () => {
     queryFn: () => xtreamApi.getSeries(credentials!, selectedCategory === 'all' ? undefined : selectedCategory),
     enabled: !!credentials,
   });
+
+  const { limit, sentinelRef, hasMore } = useInfiniteScroll(series.length);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -55,43 +58,54 @@ const SeriesPage: React.FC = () => {
       </div>
 
       {/* Series grid */}
-      <div className="px-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+      <div className="px-4">
         {isLoading ? (
-          Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="space-y-2">
-              <Skeleton className="aspect-[2/3] rounded-lg" />
-              <Skeleton className="h-3 w-3/4" />
-            </div>
-          ))
-        ) : (
-          series.map((s: SeriesInfo) => (
-            <button
-              key={s.series_id}
-              onClick={() => navigate(`/series/${s.series_id}`)}
-              className="text-left group relative"
-            >
-              <div className="aspect-[2/3] rounded-lg overflow-hidden bg-muted">
-                {s.cover ? (
-                  <img src={s.cover} alt={s.name} className="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <MonitorPlay className="w-8 h-8 text-muted-foreground" />
-                  </div>
-                )}
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="aspect-[2/3] rounded-lg" />
+                <Skeleton className="h-3 w-3/4" />
               </div>
-              <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2">{s.name}</p>
-              {s.rating && <p className="text-[10px] text-muted-foreground">⭐ {s.rating}</p>}
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  toggleFavorite({ id: s.series_id, type: 'series', name: s.name, icon: s.cover });
-                }}
-                className="absolute top-1 right-1 p-1 rounded-full bg-black/50"
-              >
-                <Heart className={cn('w-3 h-3', isFavorite(s.series_id, 'series') ? 'fill-primary text-primary' : 'text-white')} />
-              </button>
-            </button>
-          ))
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3" style={{ contentVisibility: 'auto' }}>
+              {series.slice(0, limit).map((s: SeriesInfo) => (
+                <button
+                  key={s.series_id}
+                  onClick={() => navigate(`/series/${s.series_id}`)}
+                  className="text-left group relative"
+                >
+                  <div className="aspect-[2/3] rounded-lg overflow-hidden bg-muted">
+                    {s.cover ? (
+                      <img src={s.cover} alt={s.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <MonitorPlay className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2">{s.name}</p>
+                  {s.rating && <p className="text-[10px] text-muted-foreground">⭐ {s.rating}</p>}
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleFavorite({ id: s.series_id, type: 'series', name: s.name, icon: s.cover });
+                    }}
+                    className="absolute top-1 right-1 p-1 rounded-full bg-black/50"
+                  >
+                    <Heart className={cn('w-3 h-3', isFavorite(s.series_id, 'series') ? 'fill-primary text-primary' : 'text-white')} />
+                  </button>
+                </button>
+              ))}
+            </div>
+            {hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

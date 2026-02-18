@@ -1,13 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream } from '@/lib/xtream-api';
 import { playFullscreen } from '@/lib/native-player';
 import IconSidebar from '@/components/IconSidebar';
+import ChannelCard from '@/components/ChannelCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useInfiniteScroll } from '@/hooks/use-infinite-scroll';
+import { Loader2 } from 'lucide-react';
 
 const LiveTvSplitPage: React.FC = () => {
   const { credentials, addToHistory } = useIptv();
@@ -31,7 +33,9 @@ const LiveTvSplitPage: React.FC = () => {
     return allStreams.filter(s => s.category_id === selectedCategoryId);
   }, [allStreams, selectedCategoryId]);
 
-  const handlePlay = async (stream: LiveStream) => {
+  const { limit, sentinelRef, hasMore } = useInfiniteScroll(filteredStreams.length);
+
+  const handlePlay = useCallback(async (stream: LiveStream) => {
     if (!credentials) return;
     const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
@@ -40,7 +44,7 @@ const LiveTvSplitPage: React.FC = () => {
     if (result === 'web-fallback') {
       navigate('/player', { state: { url, title: stream.name, type: 'live' } });
     }
-  };
+  }, [credentials, addToHistory, navigate]);
 
   return (
     <div className="w-full h-full flex overflow-hidden">
@@ -99,29 +103,23 @@ const LiveTvSplitPage: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-              {filteredStreams.map(stream => (
-                <button
-                  key={stream.stream_id}
-                  onClick={() => handlePlay(stream)}
-                  className="bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-square flex flex-col items-center justify-center gap-2 p-3"
-                >
-                  <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                    {stream.stream_icon ? (
-                      <img
-                        src={stream.stream_icon}
-                        alt=""
-                        className="max-w-full max-h-full object-contain"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <Radio className="w-8 h-8 text-muted-foreground" />
-                    )}
-                  </div>
-                  <p className="text-[11px] text-center text-foreground truncate w-full">{stream.name}</p>
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3" style={{ contentVisibility: 'auto' }}>
+                {filteredStreams.slice(0, limit).map(stream => (
+                  <ChannelCard
+                    key={stream.stream_id}
+                    name={stream.name}
+                    icon={stream.stream_icon}
+                    onClick={() => handlePlay(stream)}
+                  />
+                ))}
+              </div>
+              {hasMore && (
+                <div ref={sentinelRef} className="flex justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

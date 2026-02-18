@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream, Category } from '@/lib/xtream-api';
 import AppHeader from '@/components/AppHeader';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Heart, Film } from 'lucide-react';
+import { Heart, Film, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useInfiniteScroll } from '@/hooks/use-infinite-scroll';
 
 const MoviesPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
@@ -26,20 +27,20 @@ const MoviesPage: React.FC = () => {
     enabled: !!credentials,
   });
 
-  const handlePlayMovie = (movie: VodStream) => {
+  const { limit, sentinelRef, hasMore } = useInfiniteScroll(movies.length);
+
+  const handlePlayMovie = useCallback((movie: VodStream) => {
     setActiveMovie(movie);
     addToHistory({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
     if (credentials) {
       const url = xtreamApi.getVodStreamUrl(credentials, movie.stream_id, movie.container_extension || 'mp4');
       navigate('/player', { state: { url, title: movie.name } });
     }
-  };
+  }, [credentials, addToHistory, navigate]);
 
   return (
     <div className="min-h-screen bg-background pb-20">
       <AppHeader title="Filmes" />
-
-      {/* Native player opens fullscreen — no embedded player needed */}
 
       {/* Categories */}
       <div className="px-4 py-3 overflow-x-auto flex gap-2 no-scrollbar">
@@ -67,46 +68,57 @@ const MoviesPage: React.FC = () => {
       </div>
 
       {/* Movie grid */}
-      <div className="px-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+      <div className="px-4">
         {isLoading ? (
-          Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="space-y-2">
-              <Skeleton className="aspect-[2/3] rounded-lg" />
-              <Skeleton className="h-3 w-3/4" />
-            </div>
-          ))
-        ) : (
-          movies.map((movie: VodStream) => (
-            <button
-              key={movie.stream_id}
-              onClick={() => handlePlayMovie(movie)}
-              className="text-left group relative"
-            >
-              <div className={cn(
-                'aspect-[2/3] rounded-lg overflow-hidden bg-muted border-2 transition-colors',
-                activeMovie?.stream_id === movie.stream_id ? 'border-primary' : 'border-transparent'
-              )}>
-                {movie.stream_icon ? (
-                  <img src={movie.stream_icon} alt={movie.name} className="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Film className="w-8 h-8 text-muted-foreground" />
-                  </div>
-                )}
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="aspect-[2/3] rounded-lg" />
+                <Skeleton className="h-3 w-3/4" />
               </div>
-              <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2">{movie.name}</p>
-              {movie.rating && <p className="text-[10px] text-muted-foreground">⭐ {movie.rating}</p>}
-              <button
-                onClick={e => {
-                  e.stopPropagation();
-                  toggleFavorite({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
-                }}
-                className="absolute top-1 right-1 p-1 rounded-full bg-black/50"
-              >
-                <Heart className={cn('w-3 h-3', isFavorite(movie.stream_id, 'vod') ? 'fill-primary text-primary' : 'text-white')} />
-              </button>
-            </button>
-          ))
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3" style={{ contentVisibility: 'auto' }}>
+              {movies.slice(0, limit).map((movie: VodStream) => (
+                <button
+                  key={movie.stream_id}
+                  onClick={() => handlePlayMovie(movie)}
+                  className="text-left group relative"
+                >
+                  <div className={cn(
+                    'aspect-[2/3] rounded-lg overflow-hidden bg-muted border-2 transition-colors',
+                    activeMovie?.stream_id === movie.stream_id ? 'border-primary' : 'border-transparent'
+                  )}>
+                    {movie.stream_icon ? (
+                      <img src={movie.stream_icon} alt={movie.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Film className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2">{movie.name}</p>
+                  {movie.rating && <p className="text-[10px] text-muted-foreground">⭐ {movie.rating}</p>}
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleFavorite({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
+                    }}
+                    className="absolute top-1 right-1 p-1 rounded-full bg-black/50"
+                  >
+                    <Heart className={cn('w-3 h-3', isFavorite(movie.stream_id, 'vod') ? 'fill-primary text-primary' : 'text-white')} />
+                  </button>
+                </button>
+              ))}
+            </div>
+            {hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

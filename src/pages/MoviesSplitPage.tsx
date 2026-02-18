@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream } from '@/lib/xtream-api';
 import IconSidebar from '@/components/IconSidebar';
+import MovieCard from '@/components/MovieCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Film } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useInfiniteScroll } from '@/hooks/use-infinite-scroll';
 
 const MoviesSplitPage: React.FC = () => {
   const { credentials } = useIptv();
@@ -25,9 +27,11 @@ const MoviesSplitPage: React.FC = () => {
     enabled: !!credentials,
   });
 
-  const handleMovieClick = (movie: VodStream) => {
+  const { limit, sentinelRef, hasMore } = useInfiniteScroll(movies.length);
+
+  const handleMovieClick = useCallback((movie: VodStream) => {
     navigate(`/movie/${movie.stream_id}`, { state: movie });
-  };
+  }, [navigate]);
 
   return (
     <div className="w-full h-full flex overflow-hidden">
@@ -82,34 +86,24 @@ const MoviesSplitPage: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-              {movies.map(movie => (
-                <button
-                  key={movie.stream_id}
-                  onClick={() => handleMovieClick(movie)}
-                  className="bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
-                >
-                  <div className="flex-1 w-full overflow-hidden flex items-center justify-center bg-black/20">
-                    {movie.stream_icon ? (
-                      <img
-                        src={movie.stream_icon}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <Film className="w-8 h-8 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="p-2">
-                    <p className="text-[11px] text-center text-foreground truncate">{movie.name}</p>
-                    {movie.rating && (
-                      <p className="text-[10px] text-center text-muted-foreground">⭐ {movie.rating}</p>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3" style={{ contentVisibility: 'auto' }}>
+                {movies.slice(0, limit).map(movie => (
+                  <MovieCard
+                    key={movie.stream_id}
+                    name={movie.name}
+                    icon={movie.stream_icon}
+                    rating={movie.rating}
+                    onClick={() => handleMovieClick(movie)}
+                  />
+                ))}
+              </div>
+              {hasMore && (
+                <div ref={sentinelRef} className="flex justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

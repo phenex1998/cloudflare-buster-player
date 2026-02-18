@@ -1,12 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, LiveStream, Category } from '@/lib/xtream-api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Heart, Radio, Search, X } from 'lucide-react';
+import { Heart, Radio, Search, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useInfiniteScroll } from '@/hooks/use-infinite-scroll';
 
 const LiveTvPage: React.FC = () => {
   const { credentials, toggleFavorite, isFavorite, addToHistory } = useIptv();
@@ -49,13 +50,33 @@ const LiveTvPage: React.FC = () => {
       .filter(e => e.streams.length > 0);
   }, [categoryMap, search]);
 
-  const handlePlay = (stream: LiveStream) => {
+  // Flatten all visible streams for infinite scroll
+  const allVisibleStreams = useMemo(() => {
+    return filteredCategories.flatMap(e => e.streams);
+  }, [filteredCategories]);
+
+  const { limit, sentinelRef, hasMore } = useInfiniteScroll(allVisibleStreams.length);
+
+  const handlePlay = useCallback((stream: LiveStream) => {
     addToHistory({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
     if (credentials) {
       const url = xtreamApi.getLiveStreamUrl(credentials, stream.stream_id, 'ts');
       navigate('/player', { state: { url, title: stream.name } });
     }
-  };
+  }, [credentials, addToHistory, navigate]);
+
+  // Build categories with sliced streams respecting global limit
+  const visibleCategories = useMemo(() => {
+    let remaining = limit;
+    const result: { category: Category; streams: LiveStream[] }[] = [];
+    for (const entry of filteredCategories) {
+      if (remaining <= 0) break;
+      const sliced = entry.streams.slice(0, remaining);
+      result.push({ category: entry.category, streams: sliced });
+      remaining -= sliced.length;
+    }
+    return result;
+  }, [filteredCategories, limit]);
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -94,65 +115,66 @@ const LiveTvPage: React.FC = () => {
         ) : filteredCategories.length === 0 ? (
           <p className="text-center text-muted-foreground text-sm py-8">Nenhum canal encontrado.</p>
         ) : (
-          filteredCategories.map(({ category, streams }) => (
-            <section key={category.category_id}>
-              <h2 className="text-sm font-bold text-foreground tracking-wide uppercase mb-3">
-                {category.category_name}
-              </h2>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
-                {streams.map(stream => (
-                  <button
-                    key={stream.stream_id}
-                    onClick={() => handlePlay(stream)}
-                    className={cn(
-                      'group relative flex flex-col items-center rounded-xl overflow-hidden transition-all',
-                      'bg-card border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5'
-                    )}
-                  >
-                    {/* LIVE badge */}
-                    <div className="absolute top-1.5 left-1.5 z-10">
-                      <Badge variant="destructive" className="px-1.5 py-0 text-[9px] leading-4 font-bold rounded-sm">
-                        LIVE
-                      </Badge>
-                    </div>
-
-                    {/* Favorite */}
+          <>
+            {visibleCategories.map(({ category, streams }) => (
+              <section key={category.category_id}>
+                <h2 className="text-sm font-bold text-foreground tracking-wide uppercase mb-3">
+                  {category.category_name}
+                </h2>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3" style={{ contentVisibility: 'auto' }}>
+                  {streams.map(stream => (
                     <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        toggleFavorite({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
-                      }}
-                      className="absolute top-1.5 right-1.5 z-10 p-1 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Heart className={cn('w-3 h-3', isFavorite(stream.stream_id, 'live') ? 'fill-primary text-primary' : 'text-white/70')} />
-                    </button>
-
-                    {/* Logo */}
-                    <div className="w-full aspect-square flex items-center justify-center p-3 bg-muted/30">
-                      {stream.stream_icon ? (
-                        <img
-                          src={stream.stream_icon}
-                          alt={stream.name}
-                          className="max-w-full max-h-full object-contain"
-                          loading="lazy"
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
-                      ) : (
-                        <Radio className="w-8 h-8 text-muted-foreground" />
+                      key={stream.stream_id}
+                      onClick={() => handlePlay(stream)}
+                      className={cn(
+                        'group relative flex flex-col items-center rounded-xl overflow-hidden transition-all',
+                        'bg-card border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5'
                       )}
-                    </div>
-
-                    {/* Name */}
-                    <div className="w-full px-2 py-2 bg-card">
-                      <p className="text-[11px] font-medium text-foreground truncate text-center leading-tight">
-                        {stream.name}
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                    >
+                      <div className="absolute top-1.5 left-1.5 z-10">
+                        <Badge variant="destructive" className="px-1.5 py-0 text-[9px] leading-4 font-bold rounded-sm">
+                          LIVE
+                        </Badge>
+                      </div>
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          toggleFavorite({ id: stream.stream_id, type: 'live', name: stream.name, icon: stream.stream_icon });
+                        }}
+                        className="absolute top-1.5 right-1.5 z-10 p-1 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Heart className={cn('w-3 h-3', isFavorite(stream.stream_id, 'live') ? 'fill-primary text-primary' : 'text-white/70')} />
+                      </button>
+                      <div className="w-full aspect-square flex items-center justify-center p-3 bg-muted/30">
+                        {stream.stream_icon ? (
+                          <img
+                            src={stream.stream_icon}
+                            alt={stream.name}
+                            className="max-w-full max-h-full object-contain"
+                            loading="lazy"
+                            decoding="async"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        ) : (
+                          <Radio className="w-8 h-8 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div className="w-full px-2 py-2 bg-card">
+                        <p className="text-[11px] font-medium text-foreground truncate text-center leading-tight">
+                          {stream.name}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+            {hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
               </div>
-            </section>
-          ))
+            )}
+          </>
         )}
       </div>
     </div>
