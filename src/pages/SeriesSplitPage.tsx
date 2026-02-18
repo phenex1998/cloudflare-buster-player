@@ -16,7 +16,7 @@ const seriesGridComponents = {
       ref={ref}
       {...props}
       style={style}
-      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-4 p-4"
+      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-4 p-4 items-start"
     >
       {children}
     </div>
@@ -93,12 +93,12 @@ const SeriesSplitPage: React.FC = () => {
       <button
         key={s.series_id}
         onClick={() => { setSelectedSeries(s); setSelectedSeason(1); }}
-        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
+        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all flex flex-col overflow-hidden"
       >
-        <div className="relative w-full flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
+        <div className="relative w-full aspect-[2/3] bg-[#1e1e1e] flex items-center justify-center overflow-hidden">
           {s.cover ? (
             <>
-              <img src={s.cover} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async"
+              <img src={s.cover} alt="" className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300" loading="lazy" decoding="async"
                 onError={(e) => {
                   e.currentTarget.style.display = 'none';
                   (e.currentTarget.nextElementSibling as HTMLElement)?.style.removeProperty('display');
