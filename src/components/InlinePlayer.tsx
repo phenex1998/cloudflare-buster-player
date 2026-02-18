@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
+import mpegts from 'mpegts.js';
 import { Maximize, Heart, Radio } from 'lucide-react';
 import { useIptv } from '@/contexts/IptvContext';
 import { cn } from '@/lib/utils';
@@ -22,6 +23,7 @@ function getProxiedUrl(url: string): string {
 
 const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, streamType = 'live', streamIcon }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<mpegts.Player | null>(null);
   const { toggleFavorite, isFavorite } = useIptv();
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
 
@@ -29,12 +31,22 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
     const video = videoRef.current;
     if (!video) return;
 
-    // Stop previous playback
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
+    // Destroy previous player
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+        playerRef.current.unload();
+        playerRef.current.detachMediaElement();
+        playerRef.current.destroy();
+      } catch (e) {
+        console.warn('[InlinePlayer] cleanup error:', e);
+      }
+      playerRef.current = null;
+    }
 
     if (!url) {
+      video.removeAttribute('src');
+      video.load();
       setCurrentUrl(null);
       return;
     }
@@ -45,14 +57,51 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
     const playUrl = getProxiedUrl(cleanUrl);
     console.log('[InlinePlayer] Loading:', cleanUrl, native ? '(direct)' : '(proxied)');
 
-    video.src = playUrl;
-    video.load();
-    video.play().catch(() => {});
+    // Try mpegts.js first for .ts streams
+    const isTsStream = cleanUrl.toLowerCase().endsWith('.ts') || streamType === 'live';
+
+    if (isTsStream && mpegts.isSupported()) {
+      const player = mpegts.createPlayer({
+        type: 'mpegts',
+        isLive: streamType === 'live',
+        url: playUrl,
+      }, {
+        enableWorker: true,
+        liveBufferLatencyChasing: streamType === 'live',
+        liveBufferLatencyMaxLatency: 1.5,
+        liveBufferLatencyMinRemain: 0.3,
+      });
+
+      playerRef.current = player;
+      player.attachMediaElement(video);
+      player.load();
+      const playResult = player.play();
+      if (playResult && typeof playResult.catch === 'function') {
+        playResult.catch(() => {});
+      }
+
+      player.on(mpegts.Events.ERROR, (errorType: string, errorDetail: string) => {
+        console.warn('[InlinePlayer] mpegts error:', errorType, errorDetail);
+      });
+    } else {
+      // Fallback: direct src for VOD (.mp4, .mkv, etc.) or unsupported browsers
+      video.src = playUrl;
+      video.load();
+      video.play().catch(() => {});
+    }
 
     return () => {
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
+      if (playerRef.current) {
+        try {
+          playerRef.current.pause();
+          playerRef.current.unload();
+          playerRef.current.detachMediaElement();
+          playerRef.current.destroy();
+        } catch (e) {
+          console.warn('[InlinePlayer] unmount cleanup error:', e);
+        }
+        playerRef.current = null;
+      }
     };
   }, [url]);
 
