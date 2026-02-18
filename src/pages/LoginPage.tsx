@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useIptv } from '@/contexts/IptvContext';
-import { Tv, Loader2, Globe, User, Lock } from 'lucide-react';
+import { Loader2, Globe, User, Lock } from 'lucide-react';
+import logo from '@/assets/logo.png';
 
 const LoginPage: React.FC = () => {
   const { login, isLoading, error } = useIptv();
@@ -17,10 +18,8 @@ const LoginPage: React.FC = () => {
     <div className="login-bg h-screen w-screen flex flex-row overflow-hidden">
       {/* Left Column - Branding (40%) */}
       <div className="w-[40%] flex flex-col items-center justify-center gap-3 px-6">
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shadow-lg shadow-purple-500/25">
-          <Tv className="w-7 h-7 text-white" />
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight text-white">IPTV Player</h1>
+        <img src={logo} alt="BestApp" className="w-20 h-20 rounded-2xl shadow-lg shadow-purple-500/25" />
+        <h1 className="text-2xl font-bold tracking-tight text-white">BestApp</h1>
         <p className="text-gray-500 text-xs text-center max-w-[200px]">Sua experiência de entretenimento premium</p>
       </div>
 
