@@ -16,7 +16,7 @@ const gridComponents = {
       ref={ref}
       {...props}
       style={style}
-      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4"
+      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-4 p-4"
     >
       {children}
     </div>
@@ -68,22 +68,33 @@ const LiveTvSplitPage: React.FC = () => {
       <button
         key={stream.stream_id}
         onClick={() => handlePlay(stream)}
-        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-square flex flex-col items-center justify-center gap-2 p-3"
+        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-square flex flex-col overflow-hidden"
       >
-        <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+        <div className="relative w-full flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
           {stream.stream_icon ? (
-            <img
-              src={stream.stream_icon}
-              alt=""
-              className="max-w-full max-h-full object-contain"
-              loading="lazy"
-              decoding="async"
-            />
+            <>
+              <img
+                src={stream.stream_icon}
+                alt=""
+                className="w-full h-full object-contain"
+                loading="lazy"
+                decoding="async"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  (e.currentTarget.nextElementSibling as HTMLElement)?.style.removeProperty('display');
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center" style={{ display: 'none' }}>
+                <Radio className="w-8 h-8 text-muted-foreground" />
+              </div>
+            </>
           ) : (
             <Radio className="w-8 h-8 text-muted-foreground" />
           )}
         </div>
-        <p className="text-[11px] text-center text-foreground truncate w-full">{stream.name}</p>
+        <div className="p-2">
+          <p className="text-[11px] text-center text-foreground truncate">{stream.name}</p>
+        </div>
       </button>
     );
   };
