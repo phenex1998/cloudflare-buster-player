@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, forwardRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
@@ -8,6 +8,25 @@ import IconSidebar from '@/components/IconSidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { VirtuosoGrid } from 'react-virtuoso';
+
+const gridComponents = {
+  List: forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
+    <div
+      ref={ref}
+      {...props}
+      style={style}
+      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4"
+    >
+      {children}
+    </div>
+  )),
+  Item: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>
+      {children}
+    </div>
+  ),
+};
 
 const LiveTvSplitPage: React.FC = () => {
   const { credentials, addToHistory } = useIptv();
@@ -40,6 +59,33 @@ const LiveTvSplitPage: React.FC = () => {
     if (result === 'web-fallback') {
       navigate('/player', { state: { url, title: stream.name, type: 'live' } });
     }
+  };
+
+  const renderChannel = (index: number) => {
+    const stream = filteredStreams[index];
+    if (!stream) return null;
+    return (
+      <button
+        key={stream.stream_id}
+        onClick={() => handlePlay(stream)}
+        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-square flex flex-col items-center justify-center gap-2 p-3"
+      >
+        <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+          {stream.stream_icon ? (
+            <img
+              src={stream.stream_icon}
+              alt=""
+              className="max-w-full max-h-full object-contain"
+              loading="lazy"
+              decoding="async"
+            />
+          ) : (
+            <Radio className="w-8 h-8 text-muted-foreground" />
+          )}
+        </div>
+        <p className="text-[11px] text-center text-foreground truncate w-full">{stream.name}</p>
+      </button>
+    );
   };
 
   return (
@@ -91,37 +137,20 @@ const LiveTvSplitPage: React.FC = () => {
             Canais ({filteredStreams.length})
           </h2>
         </div>
-        <div className="flex-1 overflow-y-auto no-scrollbar p-4">
+        <div className="flex-1 overflow-hidden">
           {isLoading ? (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4">
               {Array.from({ length: 12 }).map((_, i) => (
                 <Skeleton key={i} className="aspect-square rounded-xl" />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-              {filteredStreams.map(stream => (
-                <button
-                  key={stream.stream_id}
-                  onClick={() => handlePlay(stream)}
-                  className="bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-square flex flex-col items-center justify-center gap-2 p-3"
-                >
-                  <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
-                    {stream.stream_icon ? (
-                      <img
-                        src={stream.stream_icon}
-                        alt=""
-                        className="max-w-full max-h-full object-contain"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <Radio className="w-8 h-8 text-muted-foreground" />
-                    )}
-                  </div>
-                  <p className="text-[11px] text-center text-foreground truncate w-full">{stream.name}</p>
-                </button>
-              ))}
-            </div>
+            <VirtuosoGrid
+              totalCount={filteredStreams.length}
+              overscan={200}
+              components={gridComponents}
+              itemContent={renderChannel}
+            />
           )}
         </div>
       </div>

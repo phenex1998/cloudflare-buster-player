@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, forwardRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
@@ -7,6 +7,25 @@ import IconSidebar from '@/components/IconSidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Film } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { VirtuosoGrid } from 'react-virtuoso';
+
+const gridComponents = {
+  List: forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
+    <div
+      ref={ref}
+      {...props}
+      style={style}
+      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4"
+    >
+      {children}
+    </div>
+  )),
+  Item: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>
+      {children}
+    </div>
+  ),
+};
 
 const MoviesSplitPage: React.FC = () => {
   const { credentials } = useIptv();
@@ -27,6 +46,38 @@ const MoviesSplitPage: React.FC = () => {
 
   const handleMovieClick = (movie: VodStream) => {
     navigate(`/movie/${movie.stream_id}`, { state: movie });
+  };
+
+  const renderMovie = (index: number) => {
+    const movie = movies[index];
+    if (!movie) return null;
+    return (
+      <button
+        key={movie.stream_id}
+        onClick={() => handleMovieClick(movie)}
+        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
+      >
+        <div className="flex-1 w-full overflow-hidden flex items-center justify-center bg-background/20">
+          {movie.stream_icon ? (
+            <img
+              src={movie.stream_icon}
+              alt=""
+              className="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+            />
+          ) : (
+            <Film className="w-8 h-8 text-muted-foreground" />
+          )}
+        </div>
+        <div className="p-2">
+          <p className="text-[11px] text-center text-foreground truncate">{movie.name}</p>
+          {movie.rating && (
+            <p className="text-[10px] text-center text-muted-foreground">⭐ {movie.rating}</p>
+          )}
+        </div>
+      </button>
+    );
   };
 
   return (
@@ -74,42 +125,20 @@ const MoviesSplitPage: React.FC = () => {
             Filmes ({movies.length})
           </h2>
         </div>
-        <div className="flex-1 overflow-y-auto no-scrollbar p-4">
+        <div className="flex-1 overflow-hidden">
           {isLoading ? (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4">
               {Array.from({ length: 12 }).map((_, i) => (
                 <Skeleton key={i} className="aspect-[2/3] rounded-xl" />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-              {movies.map(movie => (
-                <button
-                  key={movie.stream_id}
-                  onClick={() => handleMovieClick(movie)}
-                  className="bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
-                >
-                  <div className="flex-1 w-full overflow-hidden flex items-center justify-center bg-black/20">
-                    {movie.stream_icon ? (
-                      <img
-                        src={movie.stream_icon}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <Film className="w-8 h-8 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="p-2">
-                    <p className="text-[11px] text-center text-foreground truncate">{movie.name}</p>
-                    {movie.rating && (
-                      <p className="text-[10px] text-center text-muted-foreground">⭐ {movie.rating}</p>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
+            <VirtuosoGrid
+              totalCount={movies.length}
+              overscan={200}
+              components={gridComponents}
+              itemContent={renderMovie}
+            />
           )}
         </div>
       </div>
