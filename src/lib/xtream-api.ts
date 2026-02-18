@@ -113,6 +113,25 @@ export interface SeriesDetail {
   }>>;
 }
 
+export interface VodInfo {
+  info: {
+    tmdb_id?: string;
+    name: string;
+    plot: string;
+    cast: string;
+    director: string;
+    genre: string;
+    duration: string;
+    releasedate: string;
+    rating: string;
+    backdrop_path: string[];
+    movie_image: string;
+    container_extension: string;
+    youtube_trailer: string;
+  };
+  movie_data: Record<string, any>;
+}
+
 export interface EpgListing {
   id: string;
   epg_id: string;
@@ -192,6 +211,9 @@ export const xtreamApi = {
 
   getVodStreamUrl: (creds: XtreamCredentials, streamId: number, ext: string) =>
     `${baseUrl(creds)}/movie/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${streamId}.${ext}`,
+
+  getVodInfo: (creds: XtreamCredentials, vodId: number) =>
+    fetchApi<VodInfo>(apiUrl(creds, 'get_vod_info') + `&vod_id=${vodId}`),
 
   getSeriesStreamUrl: (creds: XtreamCredentials, streamId: string, ext: string) =>
     `${baseUrl(creds)}/series/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${streamId}.${ext}`,
