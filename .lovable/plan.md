@@ -1,87 +1,52 @@
 
+# Login Visual + Correcao da Tela de Series
 
-# Redesenho Visual da Tela de Login (Dark Mode Premium)
+## Parte 1: Login - Centralizar e trocar logo/nome
 
-## Resumo
-Redesenhar completamente o visual da `LoginPage.tsx` para um estilo cinematografico premium (inspirado em Netflix/HBO Max), mantendo toda a logica de autenticacao intacta (estados, handlers, contexto).
+### Mudancas em `src/pages/LoginPage.tsx`
+- Substituir o icone `Tv` pelo logo do app (imagem enviada pelo usuario)
+- Trocar o titulo de "IPTV Player" para "BestApp"
+- Centralizar melhor a coluna direita (formulario) usando `justify-center items-center`
+- Manter toda a logica de autenticacao intacta
 
----
+### Novo asset
+- Copiar a imagem enviada para `src/assets/logo.png`
+- Importar como modulo ES6 no LoginPage: `import logo from '@/assets/logo.png'`
+- Substituir o div com icone Tv por `<img src={logo} className="w-20 h-20 rounded-2xl" />`
 
-## Alteracoes
+## Parte 2: Correcao da Tela de Series (SeriesDetailPage)
 
-### Arquivo: `src/pages/LoginPage.tsx`
+### Problema identificado
+A `SeriesDetailPage` usa `min-h-screen` e `pb-20` -- layout vertical estilo mobile. Porem o app roda em landscape com `h-screen overflow-hidden` no `#root`. Isso faz com que o conteudo fique cortado e inacessivel, pois nao ha scroll disponivel.
 
-**Background Cinematografico:**
-- Fundo com gradiente radial escuro profundo (tons de roxo/azul/preto) usando CSS inline ou classes Tailwind
-- Overlay `bg-black/60` sobre o gradiente para garantir legibilidade
-- Sem imagem externa (usar gradientes CSS para evitar dependencia de assets)
+A `MovieDetailsPage` funciona corretamente porque usa `w-full h-full overflow-y-auto` (se adapta ao container).
 
-**Card Central com Glassmorphism:**
-- Container centralizado com `min-h-screen flex items-center justify-center`
-- Card com `bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl`
-- Largura `max-w-md` com padding generoso (`p-8`)
+### Solucao
+Reescrever o layout do `SeriesDetailPage` para funcionar no modo landscape (igual ao MovieDetailsPage):
 
-**Logo no Topo do Card:**
-- Icone `Tv` maior (w-12 h-12) dentro de um circulo com gradiente roxo-azul
-- Titulo "IPTV Player" em branco, fonte bold, tracking tight
-- Subtitulo em `text-gray-400`
+1. Container principal: `relative w-full h-full overflow-y-auto bg-background` (em vez de `min-h-screen`)
+2. Backdrop como fundo absoluto com gradientes
+3. Conteudo em layout horizontal (flex-row) para aproveitar a largura da tela landscape:
+   - Lado esquerdo: cover/poster da serie
+   - Lado direito: titulo, sinopse, elenco, seletor de temporadas e lista de episodios
+4. Botao de voltar fixo no canto superior esquerdo (igual ao MovieDetailsPage)
+5. Lista de episodios dentro de um container scrollavel
 
-**Inputs Estilizados com Icones:**
-- Cada input envolto em um container relativo com icone a esquerda:
-  - Host: icone `Globe` (lucide-react)
-  - Usuario: icone `User` (lucide-react)
-  - Senha: icone `Lock` (lucide-react)
-- Estilo dos inputs: `bg-white/5 border-white/10 text-white placeholder:text-gray-500 h-12 pl-11 rounded-xl`
-- Foco: `focus:border-purple-500 focus:ring-purple-500/20` (borda neon roxa)
+### Arquivos modificados
+1. `src/assets/logo.png` -- novo arquivo (copia do upload)
+2. `src/pages/LoginPage.tsx` -- logo, nome, centralizacao
+3. `src/pages/SeriesDetailPage.tsx` -- layout landscape compativel
 
-**Botao de Entrar:**
-- Gradiente: `bg-gradient-to-r from-purple-600 to-blue-600`
-- Largura total (`w-full`), altura `h-12`, `rounded-xl`
-- Hover: `hover:from-purple-500 hover:to-blue-500`
-- Active: leve scale down com `active:scale-[0.98]`
-- Texto branco bold, mantendo o spinner de loading
+### Detalhes tecnicos do SeriesDetailPage
 
-**Mensagem de Erro:**
-- Estilo: `bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl`
+O layout sera adaptado seguindo o padrao do MovieDetailsPage:
 
-**Rodape:**
-- Texto "Seus dados sao salvos localmente" em `text-gray-600 text-xs`
-
-### Arquivo: `src/index.css`
-- Adicionar classe utilitaria `.login-bg` com gradiente radial cinematografico usando `radial-gradient` com tons de roxo escuro e preto
-
----
-
-## O que NAO muda
-- Estados: `host`, `username`, `password`
-- Handler: `handleSubmit` e chamada a `login()`
-- Contexto: `useIptv()` com `login`, `isLoading`, `error`
-- Imports do contexto e logica de formulario
-
-## Detalhes Tecnicos
-
-### Icones adicionados (lucide-react)
-- `Globe` - campo Host
-- `User` - campo Usuario
-- `Lock` - campo Senha
-- `Tv` e `Loader2` - mantidos
-
-### Estrutura do input com icone
 ```text
-<div className="relative">
-  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-  <input className="pl-11 h-12 bg-white/5 ..." />
+<div className="relative w-full h-full overflow-y-auto bg-background">
+  <!-- Backdrop absoluto com gradientes -->
+  <!-- Botao voltar fixo -->
+  <!-- Conteudo: flex-row com poster + metadata + temporadas + episodios -->
 </div>
 ```
 
-### Gradiente de fundo (CSS)
-```text
-.login-bg {
-  background: radial-gradient(ellipse at top, hsla(262,60%,15%,1) 0%, hsla(225,30%,5%,1) 50%, black 100%);
-}
-```
-
-### Arquivos modificados
-1. `src/pages/LoginPage.tsx` - redesenho visual completo
-2. `src/index.css` - classe utilitaria para background
-
+A estrutura hierarquica (temporadas > episodios) sera mantida, mas organizada horizontalmente para caber na viewport landscape. O seletor de temporadas ficara como pills horizontais e os episodios em uma lista compacta abaixo.
