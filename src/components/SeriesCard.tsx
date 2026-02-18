@@ -21,6 +21,7 @@ const SeriesCard: React.FC<SeriesCardProps> = ({ name, cover, rating, onClick })
           className="w-full h-full object-cover"
           loading="lazy"
           decoding="async"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
       ) : (
         <MonitorPlay className="w-8 h-8 text-muted-foreground" />
