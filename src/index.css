@@ -161,3 +161,8 @@
   z-index: 50;
   aspect-ratio: auto;
 }
+
+/* Login cinematic background */
+.login-bg {
+  background: radial-gradient(ellipse at top, hsla(262, 60%, 15%, 1) 0%, hsla(225, 30%, 5%, 1) 50%, black 100%);
+}
