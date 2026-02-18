@@ -16,7 +16,7 @@ const seriesGridComponents = {
       ref={ref}
       {...props}
       style={style}
-      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4"
+      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-4 p-4"
     >
       {children}
     </div>
@@ -95,9 +95,19 @@ const SeriesSplitPage: React.FC = () => {
         onClick={() => { setSelectedSeries(s); setSelectedSeason(1); }}
         className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
       >
-        <div className="flex-1 w-full overflow-hidden flex items-center justify-center bg-background/20">
+        <div className="relative w-full flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
           {s.cover ? (
-            <img src={s.cover} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+            <>
+              <img src={s.cover} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  (e.currentTarget.nextElementSibling as HTMLElement)?.style.removeProperty('display');
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center" style={{ display: 'none' }}>
+                <MonitorPlay className="w-8 h-8 text-muted-foreground" />
+              </div>
+            </>
           ) : (
             <MonitorPlay className="w-8 h-8 text-muted-foreground" />
           )}
