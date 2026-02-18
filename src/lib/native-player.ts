@@ -37,7 +37,16 @@ export async function playFullscreen(url: string, title?: string): Promise<'ok' 
       showControls: true,
       displayMode: 'landscape',
       chromecast: false,
-    });
+      autoplay: true,
+    } as any);
+
+    // Failsafe: força play caso autoplay não funcione
+    try {
+      await VideoPlayer.play({ playerId: 'fullscreen-player' });
+    } catch (e) {
+      console.log('[playFullscreen] Play fallback:', e);
+    }
+
     return 'ok';
   } catch (error) {
     console.error('[playFullscreen] Erro ao abrir player:', error);
