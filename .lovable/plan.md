@@ -1,52 +1,31 @@
 
-# Login Visual + Correcao da Tela de Series
 
-## Parte 1: Login - Centralizar e trocar logo/nome
+# Correcao: Series deve abrir tela de detalhes com sinopse
 
-### Mudancas em `src/pages/LoginPage.tsx`
-- Substituir o icone `Tv` pelo logo do app (imagem enviada pelo usuario)
-- Trocar o titulo de "IPTV Player" para "BestApp"
-- Centralizar melhor a coluna direita (formulario) usando `justify-center items-center`
-- Manter toda a logica de autenticacao intacta
+## Problema
+No `SeriesSplitPage`, ao clicar em uma serie, o componente usa estado local (`setSelectedSeries`) para mostrar os episodios diretamente no painel direito -- sem backdrop, sinopse, elenco ou capa. A rota `/series/:id` com o `SeriesDetailPage` completo nunca e acessada.
 
-### Novo asset
-- Copiar a imagem enviada para `src/assets/logo.png`
-- Importar como modulo ES6 no LoginPage: `import logo from '@/assets/logo.png'`
-- Substituir o div com icone Tv por `<img src={logo} className="w-20 h-20 rounded-2xl" />`
+## Solucao
+Modificar o `SeriesSplitPage` para que ao clicar em uma serie, navegue para `/series/:id` usando `react-router-dom`, abrindo o `SeriesDetailPage` que ja possui:
+- Backdrop com gradiente
+- Poster/capa
+- Sinopse (plot), elenco (cast), genero
+- Seletor de temporadas
+- Lista formatada de episodios (S01E01)
 
-## Parte 2: Correcao da Tela de Series (SeriesDetailPage)
+## Alteracoes
 
-### Problema identificado
-A `SeriesDetailPage` usa `min-h-screen` e `pb-20` -- layout vertical estilo mobile. Porem o app roda em landscape com `h-screen overflow-hidden` no `#root`. Isso faz com que o conteudo fique cortado e inacessivel, pois nao ha scroll disponivel.
+### Arquivo: `src/pages/SeriesSplitPage.tsx`
 
-A `MovieDetailsPage` funciona corretamente porque usa `w-full h-full overflow-y-auto` (se adapta ao container).
+1. Remover o estado local `selectedSeries` e `selectedSeason`
+2. Remover a query `seriesDetail` (nao mais necessaria)
+3. Remover toda a secao de detalhes inline (episodios, temporadas dentro do split)
+4. No `onClick` do `SeriesCard`, trocar de `setSelectedSeries(s)` para `navigate('/series/' + s.series_id)`
+5. Remover imports nao utilizados (`Play`, `ArrowLeft`, `playFullscreen`, etc.)
 
-### Solucao
-Reescrever o layout do `SeriesDetailPage` para funcionar no modo landscape (igual ao MovieDetailsPage):
+O resultado: o `SeriesSplitPage` fica apenas como grid de series (categorias + cards), e ao clicar navega para a tela completa de detalhes.
 
-1. Container principal: `relative w-full h-full overflow-y-auto bg-background` (em vez de `min-h-screen`)
-2. Backdrop como fundo absoluto com gradientes
-3. Conteudo em layout horizontal (flex-row) para aproveitar a largura da tela landscape:
-   - Lado esquerdo: cover/poster da serie
-   - Lado direito: titulo, sinopse, elenco, seletor de temporadas e lista de episodios
-4. Botao de voltar fixo no canto superior esquerdo (igual ao MovieDetailsPage)
-5. Lista de episodios dentro de um container scrollavel
+### Nenhuma alteracao necessaria em:
+- `SeriesDetailPage.tsx` -- ja esta pronto com layout landscape
+- `App.tsx` -- rota `/series/:id` ja esta registrada
 
-### Arquivos modificados
-1. `src/assets/logo.png` -- novo arquivo (copia do upload)
-2. `src/pages/LoginPage.tsx` -- logo, nome, centralizacao
-3. `src/pages/SeriesDetailPage.tsx` -- layout landscape compativel
-
-### Detalhes tecnicos do SeriesDetailPage
-
-O layout sera adaptado seguindo o padrao do MovieDetailsPage:
-
-```text
-<div className="relative w-full h-full overflow-y-auto bg-background">
-  <!-- Backdrop absoluto com gradientes -->
-  <!-- Botao voltar fixo -->
-  <!-- Conteudo: flex-row com poster + metadata + temporadas + episodios -->
-</div>
-```
-
-A estrutura hierarquica (temporadas > episodios) sera mantida, mas organizada horizontalmente para caber na viewport landscape. O seletor de temporadas ficara como pills horizontais e os episodios em uma lista compacta abaixo.
