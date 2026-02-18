@@ -16,7 +16,7 @@ const gridComponents = {
       ref={ref}
       {...props}
       style={style}
-      className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-4 p-4"
+      className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 p-4 items-start"
     >
       {children}
     </div>
@@ -68,15 +68,15 @@ const LiveTvSplitPage: React.FC = () => {
       <button
         key={stream.stream_id}
         onClick={() => handlePlay(stream)}
-        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-square flex flex-col overflow-hidden"
+        className="bg-[hsl(var(--card))] rounded-xl border border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all flex flex-col overflow-hidden"
       >
-        <div className="relative w-full flex-1 bg-[#1a1a1a] flex items-center justify-center overflow-hidden">
+        <div className="relative w-full aspect-video bg-[#1e1e1e] flex items-center justify-center overflow-hidden">
           {stream.stream_icon ? (
             <>
               <img
                 src={stream.stream_icon}
                 alt=""
-                className="w-full h-full object-contain"
+                className="absolute inset-0 w-full h-full object-contain transition-opacity duration-300"
                 loading="lazy"
                 decoding="async"
                 onError={(e) => {
@@ -150,9 +150,9 @@ const LiveTvSplitPage: React.FC = () => {
         </div>
         <div className="flex-1 overflow-hidden">
           {isLoading ? (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4 p-4 items-start">
               {Array.from({ length: 12 }).map((_, i) => (
-                <Skeleton key={i} className="aspect-square rounded-xl" />
+                <Skeleton key={i} className="aspect-video rounded-xl" />
               ))}
             </div>
           ) : (
