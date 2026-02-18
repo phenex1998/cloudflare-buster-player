@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import mpegts from 'mpegts.js';
-import { Maximize, Heart, Radio } from 'lucide-react';
+import { Maximize, Heart, Radio, AlertTriangle } from 'lucide-react';
 import { useIptv } from '@/contexts/IptvContext';
 import { cn } from '@/lib/utils';
 import { isAndroid } from '@/lib/native-player';
@@ -26,12 +26,10 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
   const playerRef = useRef<mpegts.Player | null>(null);
   const { toggleFavorite, isFavorite } = useIptv();
   const [currentUrl, setCurrentUrl] = useState<string | null>(null);
+  const [playerError, setPlayerError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    // Destroy previous player
+  // Cleanup helper
+  const destroyPlayer = useCallback(() => {
     if (playerRef.current) {
       try {
         playerRef.current.pause();
@@ -43,6 +41,15 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
       }
       playerRef.current = null;
     }
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Destroy previous player
+    destroyPlayer();
+    setPlayerError(null);
 
     if (!url) {
       video.removeAttribute('src');
@@ -53,57 +60,84 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
 
     const cleanUrl = url.trim();
     setCurrentUrl(cleanUrl);
-
     const playUrl = getProxiedUrl(cleanUrl);
+
     console.log('[InlinePlayer] Loading:', cleanUrl, native ? '(direct)' : '(proxied)');
 
-    // Try mpegts.js first for .ts streams
-    const isTsStream = cleanUrl.toLowerCase().endsWith('.ts') || streamType === 'live';
+    // Regra 2: Atraso de segurança — esperar 200ms para garantir DOM pronto
+    const timer = setTimeout(() => {
+      try {
+        const isTsStream = cleanUrl.toLowerCase().endsWith('.ts') || streamType === 'live';
 
-    if (isTsStream && mpegts.isSupported()) {
-      const player = mpegts.createPlayer({
-        type: 'mpegts',
-        isLive: streamType === 'live',
-        url: playUrl,
-      }, {
-        enableWorker: true,
-        liveBufferLatencyChasing: streamType === 'live',
-        liveBufferLatencyMaxLatency: 1.5,
-        liveBufferLatencyMinRemain: 0.3,
-      });
+        if (isTsStream && mpegts.isSupported()) {
+          console.log('[InlinePlayer] Initializing mpegts.js player');
+          const player = mpegts.createPlayer({
+            type: 'mpegts',
+            isLive: streamType === 'live',
+            url: playUrl,
+          }, {
+            enableWorker: true,
+            liveBufferLatencyChasing: streamType === 'live',
+            liveBufferLatencyMaxLatency: 1.5,
+            liveBufferLatencyMinRemain: 0.3,
+          });
 
-      playerRef.current = player;
-      player.attachMediaElement(video);
-      player.load();
-      const playResult = player.play();
-      if (playResult && typeof playResult.catch === 'function') {
-        playResult.catch(() => {});
+          playerRef.current = player;
+          player.attachMediaElement(video);
+          player.load();
+
+          const playResult = player.play();
+          if (playResult && typeof playResult.catch === 'function') {
+            playResult.catch((e: unknown) => {
+              console.warn('[InlinePlayer] play() rejected:', e);
+            });
+          }
+
+          // Regra 3: Tratamento de erro com feedback visual
+          player.on(mpegts.Events.ERROR, (errorType: string, errorDetail: string, errorInfo: unknown) => {
+            const msg = `mpegts error: ${errorType} - ${errorDetail}`;
+            console.error('[InlinePlayer]', msg, errorInfo);
+            setPlayerError(msg);
+
+            // Fallback: tentar <video src> direto
+            console.log('[InlinePlayer] Fallback: direct video src');
+            destroyPlayer();
+            video.src = playUrl;
+            video.load();
+            video.play().catch(() => {});
+          });
+        } else {
+          // Fallback: direct src for VOD (.mp4, .mkv, etc.) or unsupported browsers
+          console.log('[InlinePlayer] Using direct video src (no mpegts)');
+          video.src = playUrl;
+          video.load();
+          video.play().catch(() => {});
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : JSON.stringify(err);
+        console.error('[InlinePlayer] Init error:', errMsg);
+        setPlayerError('Erro ao iniciar player: ' + errMsg);
+
+        // Fallback direto
+        try {
+          video.src = playUrl;
+          video.load();
+          video.play().catch(() => {});
+        } catch (fallbackErr) {
+          console.error('[InlinePlayer] Fallback also failed:', fallbackErr);
+        }
+
+        if (native) {
+          alert('Erro ao iniciar player: ' + errMsg);
+        }
       }
-
-      player.on(mpegts.Events.ERROR, (errorType: string, errorDetail: string) => {
-        console.warn('[InlinePlayer] mpegts error:', errorType, errorDetail);
-      });
-    } else {
-      // Fallback: direct src for VOD (.mp4, .mkv, etc.) or unsupported browsers
-      video.src = playUrl;
-      video.load();
-      video.play().catch(() => {});
-    }
+    }, 200);
 
     return () => {
-      if (playerRef.current) {
-        try {
-          playerRef.current.pause();
-          playerRef.current.unload();
-          playerRef.current.detachMediaElement();
-          playerRef.current.destroy();
-        } catch (e) {
-          console.warn('[InlinePlayer] unmount cleanup error:', e);
-        }
-        playerRef.current = null;
-      }
+      clearTimeout(timer);
+      destroyPlayer();
     };
-  }, [url]);
+  }, [url, destroyPlayer, streamType]);
 
   const handleFullscreen = useCallback(() => {
     if (native && currentUrl) {
@@ -118,7 +152,11 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
           showControls: true,
           displayMode: 'landscape',
           chromecast: false,
-        }).catch((e: unknown) => console.error('[InlinePlayer] fullscreen error:', e));
+        }).catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : JSON.stringify(e);
+          console.error('[InlinePlayer] fullscreen error:', msg);
+          alert('Erro fullscreen: ' + msg);
+        });
       });
     } else {
       videoRef.current?.requestFullscreen?.();
@@ -129,7 +167,11 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
 
   return (
     <div className="flex flex-col h-full">
-      <div className="relative flex-1 bg-black flex items-center justify-center min-h-0">
+      {/* Regra 1: Dimensões explícitas + borda vermelha de diagnóstico */}
+      <div
+        className="relative flex-1 bg-black flex items-center justify-center min-h-0"
+        style={{ minHeight: '300px', border: '1px solid red' }}
+      >
         {url ? (
           <>
             <video
@@ -146,6 +188,13 @@ const InlinePlayer: React.FC<InlinePlayerProps> = ({ url, title, streamId, strea
             >
               <Maximize className="w-5 h-5" />
             </button>
+            {/* Regra 3: Erro visível na UI */}
+            {playerError && (
+              <div className="absolute bottom-3 left-3 right-3 p-2 bg-destructive/90 text-destructive-foreground rounded-lg text-xs flex items-center gap-2 z-10">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span className="truncate">{playerError}</span>
+              </div>
+            )}
           </>
         ) : (
           <div className="flex flex-col items-center gap-3 text-muted-foreground">

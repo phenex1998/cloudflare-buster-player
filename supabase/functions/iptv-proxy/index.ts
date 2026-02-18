@@ -30,9 +30,10 @@ serve(async (req) => {
 
     const response = await fetch(targetUrl);
     const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
-    const body = await response.arrayBuffer();
 
-    return new Response(body, {
+    // Stream the response body directly instead of buffering
+    // This is critical for live streams which are infinite
+    return new Response(response.body, {
       status: response.status,
       headers: {
         ...corsHeaders,
