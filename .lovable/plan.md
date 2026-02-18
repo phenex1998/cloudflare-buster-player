@@ -1,51 +1,91 @@
 
 
-# Correcao de Safe Area para Notch e StatusBar
+# Otimizacao de Performance (Virtualizacao) + Botao Voltar Android TV
 
-## Problema
-O conteudo do app esta sendo sobreposto pela barra de status e pela area do notch/camera, especialmente nos cantos superiores em dispositivos Android.
+## Visao Geral
 
-## Solucao
-
-### 1. Habilitar viewport-fit=cover no index.html
-Adicionar `viewport-fit=cover` na meta tag viewport. Isso e obrigatorio para que as variaveis CSS `env(safe-area-inset-*)` funcionem corretamente.
-
-### 2. Aplicar padding de Safe Area no #root (index.css)
-Adicionar padding dinamico ao `#root` usando `env(safe-area-inset-*)` para empurrar todo o conteudo para fora das areas perigosas (notch, status bar, navigation bar).
-
-Regra CSS atualizada:
-```text
-html, body, #root {
-  bg-background text-foreground;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
-  padding-bottom: env(safe-area-inset-bottom);
-  box-sizing: border-box;
-}
-```
-
-Tambem garantir que `body` tenha `background-color: black` para que qualquer espaco extra do safe-area fique escuro (nao branco).
-
-### 3. Ajustar o botao Voltar da MovieDetailsPage
-O botao flutuante `fixed top-4 left-4` precisa respeitar a safe area. Trocar para usar `top: calc(1rem + env(safe-area-inset-top))` e `left: calc(1rem + env(safe-area-inset-left))` via classe utilitaria CSS ou inline style.
-
-### 4. Ajustar a BottomNav
-A nav inferior ja tem a classe `safe-area-pb` mas precisamos garantir que o padding bottom funcione. Adicionar uma classe utilitaria `safe-area-pb` no CSS caso nao exista.
+Duas melhorias criticas para tornar o app viavel em Android TV e listas grandes:
+1. Virtualizacao de listas com `react-virtuoso` para renderizar apenas itens visiveis
+2. Interceptacao do botao Voltar do Android com `@capacitor/app`
 
 ---
 
-## Detalhes Tecnicos
+## 1. Virtualizacao de Listas
+
+### Problema
+As paginas LiveTvSplitPage, MoviesSplitPage e SeriesSplitPage renderizam TODOS os itens no DOM de uma vez (potencialmente milhares), causando travamento em dispositivos com pouca RAM.
+
+### Solucao
+Instalar `react-virtuoso` e refatorar os grids dessas 3 paginas para usar `VirtuosoGrid`, que renderiza apenas os itens visiveis + um buffer.
 
 ### Arquivos modificados
 
-1. **index.html** -- Adicionar `viewport-fit=cover` na meta viewport
-2. **src/index.css** -- Adicionar safe-area padding no `#root`, background preto no body, e classe utilitaria `safe-area-pb`
-3. **src/pages/MovieDetailsPage.tsx** -- Ajustar posicao do botao Voltar para respeitar safe-area insets
+**Novo pacote**: `react-virtuoso`
 
-### Impacto
-A correcao e global: todas as paginas do app serao automaticamente empurradas para dentro da area segura. Paginas com elementos `fixed` (como o botao Voltar da MovieDetailsPage) precisam de ajuste individual.
+**LiveTvSplitPage.tsx**
+- Substituir o `div.grid` de canais por `VirtuosoGrid`
+- Cada item usa o mesmo card atual, mas renderizado sob demanda
+- Adicionar `decoding="async"` nas tags `<img>`
+
+**MoviesSplitPage.tsx**
+- Substituir o `div.grid` de filmes por `VirtuosoGrid`
+- Manter o layout `aspect-[2/3]` dos cards
+- Adicionar `decoding="async"` nas tags `<img>`
+
+**SeriesSplitPage.tsx**
+- Substituir o `div.grid` de series por `VirtuosoGrid`
+- Manter o layout existente dos cards
+- Adicionar `decoding="async"` nas tags `<img>`
+
+### Abordagem tecnica do VirtuosoGrid
+Cada pagina tera uma estrutura como:
+
+```text
+<VirtuosoGrid
+  totalCount={items.length}
+  overscan={200}
+  listClassName="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3"
+  itemClassName="..."
+  itemContent={(index) => <CardComponent item={items[index]} />}
+/>
+```
+
+O container pai (`flex-1 overflow-hidden`) servira como scroll parent. O `VirtuosoGrid` cuida automaticamente de medir e reciclar os elementos.
+
+---
+
+## 2. Botao Voltar do Android / Android TV
+
+### Problema
+O botao fisico "Voltar" fecha o app imediatamente em vez de navegar no historico.
+
+### Solucao
+Criar um hook `useAndroidBackButton` que usa `@capacitor/app` para interceptar o evento `backButton`.
+
+### Novo arquivo: `src/hooks/useAndroidBackButton.ts`
+- Importa `App` de `@capacitor/app`
+- Registra listener `App.addListener('backButton', callback)`
+- Logica:
+  - Se a rota atual e `/` (Home): chama `App.exitApp()`
+  - Qualquer outra rota: chama `window.history.back()` (equivale a `navigate(-1)`)
+- Remove o listener no cleanup do useEffect
+
+### Integracao: `src/App.tsx`
+- Chamar o hook `useAndroidBackButton()` dentro do componente `AuthenticatedRoutes`, que ja tem acesso ao router context
+
+### Pacote necessario
+`@capacitor/app` -- ja esta disponivel como dependencia do Capacitor (nao precisa instalar separadamente, faz parte do `@capacitor/core`).
+
+---
+
+## Resumo de Alteracoes
+
+| Arquivo | Tipo | Descricao |
+|---|---|---|
+| package.json | Dependencia | Adicionar `react-virtuoso` |
+| src/pages/LiveTvSplitPage.tsx | Refatorar | Grid de canais com VirtuosoGrid |
+| src/pages/MoviesSplitPage.tsx | Refatorar | Grid de filmes com VirtuosoGrid |
+| src/pages/SeriesSplitPage.tsx | Refatorar | Grid de series com VirtuosoGrid |
+| src/hooks/useAndroidBackButton.ts | Novo | Hook para interceptar botao Voltar |
+| src/App.tsx | Editar | Integrar hook do botao Voltar |
 
