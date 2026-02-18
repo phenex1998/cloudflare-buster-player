@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { App as CapApp } from '@capacitor/app';
 import { IptvProvider, useIptv } from "@/contexts/IptvContext";
 import LoginPage from "@/pages/LoginPage";
 import HomePage from "@/pages/HomePage";
@@ -28,6 +29,19 @@ function DarkMode() {
 
 function AuthenticatedRoutes() {
   const { isAuthenticated, isLoading } = useIptv();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const listener = CapApp.addListener('backButton', () => {
+      if (location.pathname === '/') {
+        CapApp.exitApp();
+      } else {
+        navigate(-1);
+      }
+    });
+    return () => { listener.then(h => h.remove()); };
+  }, [location.pathname, navigate]);
 
   if (isLoading) {
     return (
