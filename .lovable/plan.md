@@ -1,83 +1,123 @@
 
-# Correcao do Player Inline -- Diagnostico Real e Solucao
 
-## Problema Identificado
+# Corrigir Player Inline no Layout Split View (3 Colunas)
 
-Existem **dois problemas distintos** impedindo o player inline de funcionar:
+## Problemas Identificados
 
-### Problema 1: Proxy Bufferiza o Stream Inteiro (Web)
-A edge function `iptv-proxy` faz `await response.arrayBuffer()` -- isso tenta ler o stream **inteiro** antes de retornar. Streams de TV ao vivo sao **infinitos**, entao a requisicao fica pendente para sempre e o video nunca carrega.
+1. **`LiveTvSplitPage.tsx` linha 39**: Ainda usa extensao `'m3u8'` ao gerar a URL -- deveria ser `'ts'`
+2. **`InlinePlayer.tsx`**: Usa `<video>` HTML5 puro que nao consegue reproduzir streams `.ts` (MPEG-TS) sem um demuxer como HLS.js
+3. **Nenhuma integracao com Capacitor VideoPlayer no modo embedded**: O `InlinePlayer` nao usa o plugin nativo quando rodando no Android
 
-### Problema 2: mpegts.js pode falhar silenciosamente (Android WebView)
-No Android nativo (WebView), a URL vai direta sem proxy, mas o mpegts.js pode falhar silenciosamente sem feedback visual. Nao ha tratamento de erro visivel nem fallback.
+## Solucao
 
-### Sobre o modo "embedded" do plugin Capacitor
-O plugin `@capgo/capacitor-video-player` documenta que o modo `embedded` funciona **apenas na Web** (browser puro). No Android/iOS nativo, apenas `fullscreen` e suportado. Tentar `embedded` no APK resultara em erro. Contudo, vamos adicionar o try/catch com alert conforme solicitado para que o erro fique visivel caso tente.
+### 1. `src/pages/LiveTvSplitPage.tsx`
+- Linha 39: Mudar `'m3u8'` para `'ts'`
 
-## Solucao em 3 Partes
+### 2. `src/components/InlinePlayer.tsx` -- Reescrever com suporte nativo embedded
 
-### 1. Corrigir o Proxy para Streaming (`supabase/functions/iptv-proxy/index.ts`)
+O componente sera atualizado para:
+- Detectar se esta rodando em plataforma nativa (Capacitor) ou web
+- **Nativo (Android)**: Usar `@capgo/capacitor-video-player` com `mode: 'embedded'` e `componentTag` apontando para o ID do container div
+- **Web**: Manter o `<video>` HTML5 como fallback (preview apenas)
+- Antes de iniciar um novo stream, chamar `stopAllPlayers()` para limpar o player anterior
+- Adicionar `console.log` da URL para debug
+- Container div com `id="embedded-player-container"` e dimensoes `w-full h-full`
+- Botao "Expandir" que no nativo chama `initPlayer` com `mode: 'fullscreen'`, e no web chama `requestFullscreen()`
 
-Mudar de `await response.arrayBuffer()` (bufferiza tudo) para **streaming response** que repassa os bytes conforme chegam:
-
+Fluxo ao trocar de canal:
 ```text
-// ANTES (quebrado para live streams):
-const body = await response.arrayBuffer();
-return new Response(body, ...);
-
-// DEPOIS (streaming):
-return new Response(response.body, {
-  status: response.status,
-  headers: { ...corsHeaders, 'Content-Type': contentType },
-});
+1. Usuario clica no canal (Coluna 3)
+2. activeStream muda -> useEffect dispara
+3. stopAllPlayers() limpa player anterior
+4. URL gerada com extensao .ts
+5. initPlayer({ mode: 'embedded', url, componentTag: 'embedded-player-container' })
+6. Video aparece na Coluna 4 imediatamente
 ```
 
-Isso resolve o problema no Web -- o mpegts.js recebera os dados incrementalmente.
+### 3. Nenhuma mudanca necessaria em `MoviesSplitPage` e `SeriesSplitPage`
+- Esses ja usam a extensao correta (vem de `container_extension` do VOD/Series)
+- O `InlinePlayer` atualizado automaticamente beneficia essas paginas tambem
 
-### 2. Refatorar InlinePlayer com as 3 Regras de Ouro (`src/components/InlinePlayer.tsx`)
+## Detalhes Tecnicos
 
-**Regra 1 -- Dimensoes Explicitas:**
-- Adicionar `min-height: 300px` e borda vermelha temporaria no container do video
-- Garantir que o container tenha dimensoes reais antes de qualquer inicializacao
+### InlinePlayer -- logica principal
 
-**Regra 2 -- Atraso de Seguranca:**
-- Envolver a inicializacao do mpegts.js em `setTimeout` de 200ms
-- Usar `useEffect` monitorando mudanca de URL
-
-**Regra 3 -- Tratamento de Erro com Feedback Visual:**
-- try/catch em toda inicializacao
-- `console.error` + estado de erro visivel na UI com a mensagem real
-- Em ambiente nativo, tentar Capacitor embedded mode com try/catch + alert para diagnostico
-- Se falhar, fazer fallback para `<video src>` direto
-
-**Logica de playback com fallback:**
 ```text
-1. URL muda -> useEffect dispara
-2. Limpar player anterior (destroy)
-3. setTimeout 200ms para garantir container renderizado
-4. Tentar mpegts.js com a URL (proxied no web, direta no nativo)
-5. Se mpegts falhar -> fallback: video.src = url direto
-6. Se tudo falhar -> mostrar erro na UI com mensagem real
+// Detectar plataforma
+const isNative = Capacitor.isNativePlatform();
+
+// useEffect quando URL muda:
+useEffect(() => {
+  if (!url) return;
+  
+  const cleanUrl = url.trim();
+  console.log('[InlinePlayer] URL:', cleanUrl);
+
+  if (isNative) {
+    // Importar dinamicamente o plugin
+    import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
+      // Parar player anterior
+      VideoPlayer.stopAllPlayers().catch(() => {});
+      
+      // Iniciar novo player embedded
+      VideoPlayer.initPlayer({
+        mode: 'embedded',
+        url: cleanUrl,
+        playerId: 'embeddedPlayer',
+        componentTag: 'embedded-player-container',
+        title: title || 'Stream',
+        exitOnEnd: false,
+        loopOnEnd: false,
+        showControls: true,
+        displayMode: 'landscape',
+        chromecast: false,
+      });
+    });
+  } else {
+    // Web fallback com <video> HTML5
+    video.src = cleanUrl;
+    video.load();
+    video.play();
+  }
+
+  // Cleanup
+  return () => {
+    if (isNative) {
+      import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
+        VideoPlayer.stopAllPlayers().catch(() => {});
+      });
+    }
+  };
+}, [url]);
 ```
 
-**Tentativa Capacitor embedded (diagnostico):**
-- No Android nativo, apos falha do mpegts.js, tentar `VideoPlayer.initPlayer({ mode: 'embedded' })` com try/catch
-- O alert mostrara a mensagem de erro real do plugin (provavelmente "embedded not supported on native")
-- Isso serve como diagnostico, nao como solucao permanente
+### Container div (dentro do JSX)
+```text
+<div id="embedded-player-container" className="w-full h-full" style={{ minHeight: '100%' }}>
+  {/* No web, renderiza <video>. No nativo, o plugin injeta o player aqui */}
+</div>
+```
 
-### 3. Manter Fullscreen Nativo Funcionando
-
-O botao "Expandir" continuara usando o plugin Capacitor com `mode: 'fullscreen'` no Android (ExoPlayer) -- isso funciona e nao sera alterado.
+### Botao Expandir (fullscreen)
+```text
+// No nativo: abre fullscreen via plugin
+// No web: usa requestFullscreen() do elemento video
+handleFullscreen = () => {
+  if (isNative) {
+    VideoPlayer.initPlayer({ mode: 'fullscreen', url: currentUrl, ... });
+  } else {
+    videoRef.current?.requestFullscreen();
+  }
+};
+```
 
 ## Arquivos Modificados
-
-1. **`supabase/functions/iptv-proxy/index.ts`** -- Mudar para streaming response (nao bufferizar)
-2. **`src/components/InlinePlayer.tsx`** -- Aplicar as 3 regras de ouro + fallback chain + diagnostico
+1. `src/pages/LiveTvSplitPage.tsx` -- corrigir extensao `.ts` (1 linha)
+2. `src/components/InlinePlayer.tsx` -- reescrever com suporte nativo embedded + cleanup
 
 ## Resultado Esperado
+- Ao clicar num canal na lista, o video aparece imediatamente na coluna da direita (sem mudar de pagina)
+- Trocar de canal limpa o player anterior e inicia o novo sem sobreposicao de audio
+- Botao "Expandir" permite tela cheia
+- No preview web, mostra o elemento `<video>` como fallback
 
-- **Web (preview)**: Proxy faz streaming -> mpegts.js recebe dados -> video toca inline
-- **Android (APK)**: URL direta -> mpegts.js no WebView -> video toca inline
-- **Fallback**: Se mpegts.js falhar, tenta `<video src>` direto
-- **Diagnostico**: Erros aparecem visivelmente na UI e no console com mensagens reais
-- **Borda vermelha temporaria**: Confirma visualmente que o container existe e tem dimensoes
