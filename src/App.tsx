@@ -11,6 +11,7 @@ import LiveTvSplitPage from "@/pages/LiveTvSplitPage";
 import MoviesSplitPage from "@/pages/MoviesSplitPage";
 import MovieDetailsPage from "@/pages/MovieDetailsPage";
 import SeriesSplitPage from "@/pages/SeriesSplitPage";
+import SeriesDetailPage from "@/pages/SeriesDetailPage";
 import FavoritesPage from "@/pages/FavoritesPage";
 import SearchPage from "@/pages/SearchPage";
 import PlayerPage from "@/pages/PlayerPage";
@@ -62,6 +63,7 @@ function AuthenticatedRoutes() {
       <Route path="/movies" element={<MoviesSplitPage />} />
       <Route path="/movie/:id" element={<MovieDetailsPage />} />
       <Route path="/series" element={<SeriesSplitPage />} />
+      <Route path="/series/:id" element={<SeriesDetailPage />} />
       <Route path="/favorites" element={<FavoritesPage />} />
       <Route path="/search" element={<SearchPage />} />
       <Route path="/player" element={<PlayerPage />} />
