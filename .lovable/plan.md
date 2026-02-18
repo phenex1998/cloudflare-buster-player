@@ -1,123 +1,108 @@
 
+# Pivot: Remover Player Inline e Usar Fullscreen Direto
 
-# Corrigir Player Inline no Layout Split View (3 Colunas)
+## Resumo
 
-## Problemas Identificados
+Simplificar a arquitetura removendo o player inline (coluna da direita) de todas as split pages. O layout passa a ter apenas 2 areas: Sidebar de icones + Area principal com categorias e grid de cards. Ao clicar em um card, o video abre direto em tela cheia via plugin nativo (ou fallback web).
 
-1. **`LiveTvSplitPage.tsx` linha 39**: Ainda usa extensao `'m3u8'` ao gerar a URL -- deveria ser `'ts'`
-2. **`InlinePlayer.tsx`**: Usa `<video>` HTML5 puro que nao consegue reproduzir streams `.ts` (MPEG-TS) sem um demuxer como HLS.js
-3. **Nenhuma integracao com Capacitor VideoPlayer no modo embedded**: O `InlinePlayer` nao usa o plugin nativo quando rodando no Android
+---
 
-## Solucao
+## Mudancas
 
-### 1. `src/pages/LiveTvSplitPage.tsx`
-- Linha 39: Mudar `'m3u8'` para `'ts'`
+### 1. `src/pages/LiveTvSplitPage.tsx` -- Reescrever
 
-### 2. `src/components/InlinePlayer.tsx` -- Reescrever com suporte nativo embedded
+- Remover import e uso do `InlinePlayer`
+- Layout: `IconSidebar` (60px) + area principal dividida em categorias (coluna esquerda ~220px) e grid de cards (resto)
+- Categorias: mantém lista vertical atual com scroll
+- Grid de canais: substituir lista vertical por CSS Grid responsivo (`grid-template-columns: repeat(auto-fill, minmax(140px, 1fr))`)
+- Card de canal: fundo `#1a1a1a`, cantos arredondados (`rounded-xl`), logo centralizada grande, nome pequeno embaixo
+- Ao clicar num card: chamar funcao `playFullscreen(url)` que usa `@capgo/capacitor-video-player` com `mode: 'fullscreen'`
+- Fallback web: abrir `/player` via navigate (para preview no browser)
 
-O componente sera atualizado para:
-- Detectar se esta rodando em plataforma nativa (Capacitor) ou web
-- **Nativo (Android)**: Usar `@capgo/capacitor-video-player` com `mode: 'embedded'` e `componentTag` apontando para o ID do container div
-- **Web**: Manter o `<video>` HTML5 como fallback (preview apenas)
-- Antes de iniciar um novo stream, chamar `stopAllPlayers()` para limpar o player anterior
-- Adicionar `console.log` da URL para debug
-- Container div com `id="embedded-player-container"` e dimensoes `w-full h-full`
-- Botao "Expandir" que no nativo chama `initPlayer` com `mode: 'fullscreen'`, e no web chama `requestFullscreen()`
+### 2. `src/pages/MoviesSplitPage.tsx` -- Reescrever
 
-Fluxo ao trocar de canal:
+- Mesma estrutura: Sidebar + Categorias + Grid de posters
+- Card de filme: poster como background, nome embaixo, rating
+- Click: fullscreen direto com a URL do VOD
+
+### 3. `src/pages/SeriesSplitPage.tsx` -- Reescrever
+
+- Sidebar + Categorias + Grid de series
+- Ao selecionar uma serie, mostrar temporadas/episodios no grid (substituindo a lista de series)
+- Click em episodio: fullscreen direto
+
+### 4. `src/components/InlinePlayer.tsx` -- Remover
+
+- Arquivo nao sera mais usado por nenhuma pagina
+- Sera deletado
+
+### 5. `src/lib/native-player.ts` -- Adicionar funcao `playFullscreen`
+
+Nova funcao utilitaria:
 ```text
-1. Usuario clica no canal (Coluna 3)
-2. activeStream muda -> useEffect dispara
-3. stopAllPlayers() limpa player anterior
-4. URL gerada com extensao .ts
-5. initPlayer({ mode: 'embedded', url, componentTag: 'embedded-player-container' })
-6. Video aparece na Coluna 4 imediatamente
+export async function playFullscreen(url: string, title?: string) {
+  if (isAndroid()) {
+    const { VideoPlayer } = await import('@capgo/capacitor-video-player');
+    await VideoPlayer.stopAllPlayers().catch(() => {});
+    await VideoPlayer.initPlayer({
+      mode: 'fullscreen',
+      url: url.trim(),
+      playerId: 'fullscreen-player',
+      componentTag: 'div',
+      title: title || 'Stream',
+      exitOnEnd: true,
+      loopOnEnd: false,
+      showControls: true,
+      displayMode: 'landscape',
+      chromecast: false,
+    });
+  } else {
+    // Web fallback: navigate to /player
+    return 'web-fallback';
+  }
+}
 ```
 
-### 3. Nenhuma mudanca necessaria em `MoviesSplitPage` e `SeriesSplitPage`
-- Esses ja usam a extensao correta (vem de `container_extension` do VOD/Series)
-- O `InlinePlayer` atualizado automaticamente beneficia essas paginas tambem
+### 6. Estilo dos Cards (via Tailwind)
+
+Cada card de canal/filme:
+```text
+- bg-[#1a1a1a]
+- rounded-xl
+- border border-white/5
+- hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10
+- transition-all
+- aspect-square (canais) ou aspect-[2/3] (filmes/series)
+- Logo/poster centralizado com padding
+- Nome: text-[11px] text-center truncate
+```
+
+Grid container:
+```text
+grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-4
+```
+
+---
 
 ## Detalhes Tecnicos
 
-### InlinePlayer -- logica principal
-
+### Fluxo de reproducao
 ```text
-// Detectar plataforma
-const isNative = Capacitor.isNativePlatform();
-
-// useEffect quando URL muda:
-useEffect(() => {
-  if (!url) return;
-  
-  const cleanUrl = url.trim();
-  console.log('[InlinePlayer] URL:', cleanUrl);
-
-  if (isNative) {
-    // Importar dinamicamente o plugin
-    import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-      // Parar player anterior
-      VideoPlayer.stopAllPlayers().catch(() => {});
-      
-      // Iniciar novo player embedded
-      VideoPlayer.initPlayer({
-        mode: 'embedded',
-        url: cleanUrl,
-        playerId: 'embeddedPlayer',
-        componentTag: 'embedded-player-container',
-        title: title || 'Stream',
-        exitOnEnd: false,
-        loopOnEnd: false,
-        showControls: true,
-        displayMode: 'landscape',
-        chromecast: false,
-      });
-    });
-  } else {
-    // Web fallback com <video> HTML5
-    video.src = cleanUrl;
-    video.load();
-    video.play();
-  }
-
-  // Cleanup
-  return () => {
-    if (isNative) {
-      import('@capgo/capacitor-video-player').then(({ VideoPlayer }) => {
-        VideoPlayer.stopAllPlayers().catch(() => {});
-      });
-    }
-  };
-}, [url]);
+1. Usuario navega: Sidebar > TV ao Vivo
+2. Seleciona categoria (ex: Esportes)
+3. Grid mostra cards dos canais
+4. Clica num card
+5. playFullscreen(url) e chamado
+6. No Android: ExoPlayer abre em tela cheia
+7. No Web: navega para /player com a URL no state
+8. Ao fechar fullscreen, volta para o grid
 ```
 
-### Container div (dentro do JSX)
-```text
-<div id="embedded-player-container" className="w-full h-full" style={{ minHeight: '100%' }}>
-  {/* No web, renderiza <video>. No nativo, o plugin injeta o player aqui */}
-</div>
-```
+### Arquivos modificados
+1. `src/pages/LiveTvSplitPage.tsx` -- reescrever (remover player, adicionar grid)
+2. `src/pages/MoviesSplitPage.tsx` -- reescrever (remover player, adicionar grid)
+3. `src/pages/SeriesSplitPage.tsx` -- reescrever (remover player, adicionar grid)
+4. `src/lib/native-player.ts` -- adicionar `playFullscreen()`
 
-### Botao Expandir (fullscreen)
-```text
-// No nativo: abre fullscreen via plugin
-// No web: usa requestFullscreen() do elemento video
-handleFullscreen = () => {
-  if (isNative) {
-    VideoPlayer.initPlayer({ mode: 'fullscreen', url: currentUrl, ... });
-  } else {
-    videoRef.current?.requestFullscreen();
-  }
-};
-```
-
-## Arquivos Modificados
-1. `src/pages/LiveTvSplitPage.tsx` -- corrigir extensao `.ts` (1 linha)
-2. `src/components/InlinePlayer.tsx` -- reescrever com suporte nativo embedded + cleanup
-
-## Resultado Esperado
-- Ao clicar num canal na lista, o video aparece imediatamente na coluna da direita (sem mudar de pagina)
-- Trocar de canal limpa o player anterior e inicia o novo sem sobreposicao de audio
-- Botao "Expandir" permite tela cheia
-- No preview web, mostra o elemento `<video>` como fallback
-
+### Arquivos removidos
+1. `src/components/InlinePlayer.tsx`
