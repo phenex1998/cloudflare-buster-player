@@ -88,7 +88,11 @@ const MovieDetailsPage: React.FC = () => {
       {/* Back button */}
       <button
         onClick={() => navigate(-1)}
-        className="fixed top-4 left-4 z-50 p-2 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-colors"
+        className="fixed z-50 p-2 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-colors"
+        style={{
+          top: 'calc(1rem + env(safe-area-inset-top))',
+          left: 'calc(1rem + env(safe-area-inset-left))',
+        }}
       >
         <ArrowLeft className="w-5 h-5 text-white" />
       </button>

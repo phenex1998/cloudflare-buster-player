@@ -74,6 +74,11 @@
 @layer base {
   * {
     @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: black;
   }
 
   html, body, #root {
@@ -81,7 +86,19 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
   }
+}
+
+/* Safe area utilities */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-area-pt {
+  padding-top: env(safe-area-inset-top);
 }
 
 /* Glassmorphism utilities */
