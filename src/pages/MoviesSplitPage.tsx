@@ -3,14 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, VodStream } from '@/lib/xtream-api';
-import { playFullscreen } from '@/lib/native-player';
 import IconSidebar from '@/components/IconSidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Film } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const MoviesSplitPage: React.FC = () => {
-  const { credentials, addToHistory } = useIptv();
+  const { credentials } = useIptv();
   const navigate = useNavigate();
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
@@ -26,15 +25,8 @@ const MoviesSplitPage: React.FC = () => {
     enabled: !!credentials,
   });
 
-  const handlePlay = async (movie: VodStream) => {
-    if (!credentials) return;
-    const url = xtreamApi.getVodStreamUrl(credentials, movie.stream_id, movie.container_extension || 'mp4');
-    addToHistory({ id: movie.stream_id, type: 'vod', name: movie.name, icon: movie.stream_icon });
-
-    const result = await playFullscreen(url, movie.name);
-    if (result === 'web-fallback') {
-      navigate('/player', { state: { url, title: movie.name, type: 'vod' } });
-    }
+  const handleMovieClick = (movie: VodStream) => {
+    navigate(`/movie/${movie.stream_id}`, { state: movie });
   };
 
   return (
@@ -94,7 +86,7 @@ const MoviesSplitPage: React.FC = () => {
               {movies.map(movie => (
                 <button
                   key={movie.stream_id}
-                  onClick={() => handlePlay(movie)}
+                  onClick={() => handleMovieClick(movie)}
                   className="bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
                 >
                   <div className="flex-1 w-full overflow-hidden flex items-center justify-center bg-black/20">
