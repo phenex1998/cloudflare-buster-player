@@ -1,118 +1,51 @@
 
 
-# Criar MovieDetailsPage com Integracao TMDB
+# Correcao de Safe Area para Notch e StatusBar
 
-## Resumo
+## Problema
+O conteudo do app esta sendo sobreposto pela barra de status e pela area do notch/camera, especialmente nos cantos superiores em dispositivos Android.
 
-Criar uma pagina de detalhes de filme estilo Netflix/IMDb que exibe metadados completos vindos do TMDB antes de iniciar a reproducao. O grid de filmes passa a navegar para a pagina de detalhes em vez de tocar direto.
+## Solucao
 
----
+### 1. Habilitar viewport-fit=cover no index.html
+Adicionar `viewport-fit=cover` na meta tag viewport. Isso e obrigatorio para que as variaveis CSS `env(safe-area-inset-*)` funcionem corretamente.
 
-## Passo 1: Configurar a API Key do TMDB
+### 2. Aplicar padding de Safe Area no #root (index.css)
+Adicionar padding dinamico ao `#root` usando `env(safe-area-inset-*)` para empurrar todo o conteudo para fora das areas perigosas (notch, status bar, navigation bar).
 
-Armazenar a chave TMDB como secret no backend para uso seguro em uma edge function.
-
-## Passo 2: Criar Edge Function `tmdb-proxy`
-
-Uma funcao backend que recebe o nome do filme e busca no TMDB:
-- Endpoint: `POST /tmdb-proxy` com `{ query: "nome do filme" }`
-- Chama `https://api.themoviedb.org/3/search/movie` com a API key
-- Retorna: titulo, sinopse, backdrop, poster, elenco, diretor, duracao, ano, nota
-
-## Passo 3: Adicionar `getVodInfo` no `xtream-api.ts`
-
-Adicionar metodo para buscar info detalhada do VOD via Xtream (`get_vod_info`), que retorna dados como `container_extension`, `duration`, etc. Isso complementa os dados do TMDB.
-
-Interface `VodInfo`:
+Regra CSS atualizada:
 ```text
-{
-  info: {
-    tmdb_id?: string;
-    name: string;
-    plot: string;
-    cast: string;
-    director: string;
-    genre: string;
-    duration: string;
-    releasedate: string;
-    rating: string;
-    backdrop_path: string[];
-    movie_image: string;
-    container_extension: string;
-    youtube_trailer: string;
-  };
-  movie_data: { ... };
+html, body, #root {
+  bg-background text-foreground;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
 }
 ```
 
-## Passo 4: Criar `src/pages/MovieDetailsPage.tsx`
+Tambem garantir que `body` tenha `background-color: black` para que qualquer espaco extra do safe-area fique escuro (nao branco).
 
-Nova pagina com layout cinematografico:
+### 3. Ajustar o botao Voltar da MovieDetailsPage
+O botao flutuante `fixed top-4 left-4` precisa respeitar a safe area. Trocar para usar `top: calc(1rem + env(safe-area-inset-top))` e `left: calc(1rem + env(safe-area-inset-left))` via classe utilitaria CSS ou inline style.
 
-**Background Hero:**
-- Imagem backdrop do TMDB (ou do Xtream) cobrindo toda a tela
-- Overlay gradiente escuro: `bg-gradient-to-r from-black/90 via-black/70 to-transparent`
-- Fallback: poster borrado se nao houver backdrop
-
-**Botao Voltar:**
-- Flutuante no canto superior esquerdo com `z-50`
-- Icone `ArrowLeft` com fundo semi-transparente
-
-**Layout em Duas Colunas (flex):**
-
-Coluna Esquerda:
-- Poster vertical com `h-[300px]`, `rounded-xl`, `shadow-2xl`
-
-Coluna Direita:
-- Titulo: `text-3xl font-bold text-white`
-- Info Row: Badges com Rating, Ano, Duracao, Formato (container_extension)
-- Botao "Assistir Agora": Grande, verde (`bg-green-600`), icone Play, chama `playFullscreen()`
-- Botao "Favoritos": Coracao toggle usando `useIptv().toggleFavorite`
-- Botao "Trailer": Abre link do YouTube se disponivel
-- Sinopse: Texto `text-[#cccccc]` com limite de 4 linhas e toggle "Ler mais"
-- Elenco/Direcao: Linha simples abaixo da sinopse
-
-**Dados:** Primeiro tenta carregar do TMDB via edge function. Dados do Xtream (`get_vod_info`) servem como fallback e complemento (container_extension, stream URL).
-
-## Passo 5: Atualizar `MoviesSplitPage.tsx`
-
-Mudar o `onClick` dos cards de filme:
-- De: `handlePlay(movie)` (toca direto)
-- Para: `navigate('/movie/' + movie.stream_id, { state: movie })` (abre detalhes)
-
-## Passo 6: Registrar Rota no `App.tsx`
-
-Adicionar:
-```text
-<Route path="/movie/:id" element={<MovieDetailsPage />} />
-```
+### 4. Ajustar a BottomNav
+A nav inferior ja tem a classe `safe-area-pb` mas precisamos garantir que o padding bottom funcione. Adicionar uma classe utilitaria `safe-area-pb` no CSS caso nao exista.
 
 ---
 
 ## Detalhes Tecnicos
 
-### Fluxo de dados
-
-```text
-1. Usuario clica no poster no grid
-2. Navega para /movie/:id com dados basicos no state
-3. MovieDetailsPage carrega:
-   a. Dados Xtream via get_vod_info (container_extension, stream URL)
-   b. Dados TMDB via edge function tmdb-proxy (sinopse, elenco, backdrop HD)
-4. Exibe pagina completa
-5. Usuario clica "Assistir Agora"
-6. playFullscreen() abre player nativo em tela cheia
-```
-
-### Arquivos criados
-1. `supabase/functions/tmdb-proxy/index.ts` -- edge function para buscar no TMDB
-2. `src/pages/MovieDetailsPage.tsx` -- pagina de detalhes
-
 ### Arquivos modificados
-1. `src/lib/xtream-api.ts` -- adicionar `getVodInfo()` e interface `VodInfo`
-2. `src/pages/MoviesSplitPage.tsx` -- mudar click para navegar em vez de tocar
-3. `src/App.tsx` -- adicionar rota `/movie/:id`
 
-### Secret necessario
-- `TMDB_API_KEY` -- chave de API do TMDB (sera solicitada ao usuario)
+1. **index.html** -- Adicionar `viewport-fit=cover` na meta viewport
+2. **src/index.css** -- Adicionar safe-area padding no `#root`, background preto no body, e classe utilitaria `safe-area-pb`
+3. **src/pages/MovieDetailsPage.tsx** -- Ajustar posicao do botao Voltar para respeitar safe-area insets
+
+### Impacto
+A correcao e global: todas as paginas do app serao automaticamente empurradas para dentro da area segura. Paginas com elementos `fixed` (como o botao Voltar da MovieDetailsPage) precisam de ajuste individual.
 
