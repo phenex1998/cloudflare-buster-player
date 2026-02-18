@@ -1,85 +1,87 @@
 
 
-# Otimizacao da Secao de Series (Grid + Detalhes)
+# Redesenho Visual da Tela de Login (Dark Mode Premium)
 
 ## Resumo
-Melhorar a experiencia de Series em duas frentes: (1) garantir que o grid de series use o mesmo padrao visual do MovieCard com aspect-ratio rigido e skeleton loading, e (2) redesenhar a tela de detalhes com backdrop, sinopse, elenco, seletor de temporadas e cards de episodios formatados (S01E01).
+Redesenhar completamente o visual da `LoginPage.tsx` para um estilo cinematografico premium (inspirado em Netflix/HBO Max), mantendo toda a logica de autenticacao intacta (estados, handlers, contexto).
 
 ---
 
-## Passo 1: Atualizar o SeriesCard
+## Alteracoes
 
-O `SeriesCard` ja esta memoizado e com aspect-ratio 2/3, mas falta o tratamento `onError` nas imagens (igual ao padrao do projeto). Adicionar `onError` para ocultar imagens quebradas.
+### Arquivo: `src/pages/LoginPage.tsx`
 
-**Arquivo:** `src/components/SeriesCard.tsx`
+**Background Cinematografico:**
+- Fundo com gradiente radial escuro profundo (tons de roxo/azul/preto) usando CSS inline ou classes Tailwind
+- Overlay `bg-black/60` sobre o gradiente para garantir legibilidade
+- Sem imagem externa (usar gradientes CSS para evitar dependencia de assets)
 
-## Passo 2: Redesenhar o SeriesDetailPage
+**Card Central com Glassmorphism:**
+- Container centralizado com `min-h-screen flex items-center justify-center`
+- Card com `bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl`
+- Largura `max-w-md` com padding generoso (`p-8`)
 
-Reescrever `src/pages/SeriesDetailPage.tsx` com o layout solicitado:
+**Logo no Topo do Card:**
+- Icone `Tv` maior (w-12 h-12) dentro de um circulo com gradiente roxo-azul
+- Titulo "IPTV Player" em branco, fonte bold, tracking tight
+- Subtitulo em `text-gray-400`
 
-**Header com Backdrop:**
-- Usar `detail.info.backdrop_path[0]` ou `detail.info.cover` como imagem de fundo
-- Aplicar gradiente escuro (`bg-gradient-to-t from-background to-transparent`) sobre a imagem
-- Exibir titulo, sinopse (plot), elenco (cast) e genero sobre o gradiente
+**Inputs Estilizados com Icones:**
+- Cada input envolto em um container relativo com icone a esquerda:
+  - Host: icone `Globe` (lucide-react)
+  - Usuario: icone `User` (lucide-react)
+  - Senha: icone `Lock` (lucide-react)
+- Estilo dos inputs: `bg-white/5 border-white/10 text-white placeholder:text-gray-500 h-12 pl-11 rounded-xl`
+- Foco: `focus:border-purple-500 focus:ring-purple-500/20` (borda neon roxa)
 
-**Seletor de Temporadas:**
-- Barra horizontal scrollavel com botoes pill para cada temporada
-- Usar o array `detail.seasons` para gerar as abas
-- Estado `selectedSeason` controla qual temporada esta ativa
+**Botao de Entrar:**
+- Gradiente: `bg-gradient-to-r from-purple-600 to-blue-600`
+- Largura total (`w-full`), altura `h-12`, `rounded-xl`
+- Hover: `hover:from-purple-500 hover:to-blue-500`
+- Active: leve scale down com `active:scale-[0.98]`
+- Texto branco bold, mantendo o spinner de loading
 
-**Lista de Episodios:**
-- Lista vertical de cards de episodio
-- Cada card mostra: numero formatado (S01E01), titulo, duracao e thumbnail (se houver)
-- Ao clicar no episodio, abre o player nativo via `playFullscreen()` com fallback para `/player`
+**Mensagem de Erro:**
+- Estilo: `bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl`
 
-**Card de Episodio (formato):**
-- Numero: `S${String(ep.season).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')}`
-- Titulo do episodio
-- Duracao (se disponivel)
-- Icone de Play
-- Sinopse curta do episodio (se disponivel em `ep.info.plot`)
+**Rodape:**
+- Texto "Seus dados sao salvos localmente" em `text-gray-600 text-xs`
 
-## Passo 3: Adicionar rota /series/:id no App.tsx
-
-Atualmente so existe a rota `/series` (SeriesSplitPage). Adicionar:
-- `<Route path="/series/:id" element={<SeriesDetailPage />} />`
-- Importar `SeriesDetailPage` no App.tsx
-
-Isso permite que tanto o `SeriesPage` (mobile) quanto o `SeriesSplitPage` possam navegar para a tela de detalhes.
-
-## Passo 4: Usar playFullscreen no SeriesDetailPage
-
-Substituir a navegacao direta para `/player` pela logica padrao do projeto:
-1. Chamar `playFullscreen(url, title)`
-2. Se retornar `'web-fallback'`, navegar para `/player` com state
+### Arquivo: `src/index.css`
+- Adicionar classe utilitaria `.login-bg` com gradiente radial cinematografico usando `radial-gradient` com tons de roxo escuro e preto
 
 ---
+
+## O que NAO muda
+- Estados: `host`, `username`, `password`
+- Handler: `handleSubmit` e chamada a `login()`
+- Contexto: `useIptv()` com `login`, `isLoading`, `error`
+- Imports do contexto e logica de formulario
 
 ## Detalhes Tecnicos
 
-### Dados disponiveis da API (SeriesDetail)
-- `info.name` - titulo
-- `info.plot` - sinopse
-- `info.cast` - elenco
-- `info.genre` - genero
-- `info.cover` - capa
-- `info.backdrop_path[]` - imagens de fundo
-- `seasons[]` - lista de temporadas com `season_number`, `name`, `cover`
-- `episodes[season_number][]` - episodios com `id`, `episode_num`, `title`, `container_extension`, `season`, `info.duration`, `info.plot`
+### Icones adicionados (lucide-react)
+- `Globe` - campo Host
+- `User` - campo Usuario
+- `Lock` - campo Senha
+- `Tv` e `Loader2` - mantidos
 
-### URL de stream do episodio
+### Estrutura do input com icone
 ```text
-xtreamApi.getSeriesStreamUrl(credentials, ep.id, ep.container_extension)
+<div className="relative">
+  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+  <input className="pl-11 h-12 bg-white/5 ..." />
+</div>
 ```
-A extensao vem da API (`container_extension`), podendo ser `.mkv`, `.mp4`, etc.
+
+### Gradiente de fundo (CSS)
+```text
+.login-bg {
+  background: radial-gradient(ellipse at top, hsla(262,60%,15%,1) 0%, hsla(225,30%,5%,1) 50%, black 100%);
+}
+```
 
 ### Arquivos modificados
-1. `src/components/SeriesCard.tsx` - adicionar onError na img
-2. `src/pages/SeriesDetailPage.tsx` - redesenho completo
-3. `src/App.tsx` - adicionar rota `/series/:id`
-
-### Impacto
-- O grid de series permanece identico em layout
-- A tela de detalhes ganha visual rico com backdrop e informacoes completas
-- O player so abre ao clicar em um episodio especifico, nunca ao abrir a serie
+1. `src/pages/LoginPage.tsx` - redesenho visual completo
+2. `src/index.css` - classe utilitaria para background
 
