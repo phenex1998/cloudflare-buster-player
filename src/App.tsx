@@ -15,6 +15,7 @@ import SearchPage from "@/pages/SearchPage";
 import PlayerPage from "@/pages/PlayerPage";
 import NotFound from "./pages/NotFound";
 import { useEffect } from "react";
+import { useAndroidBackButton } from "@/hooks/useAndroidBackButton";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ function DarkMode() {
 
 function AuthenticatedRoutes() {
   const { isAuthenticated, isLoading } = useIptv();
+  useAndroidBackButton();
 
   if (isLoading) {
     return (
