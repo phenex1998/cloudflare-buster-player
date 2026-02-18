@@ -1,51 +1,113 @@
 
 
-# Correcao de Safe Area para Notch e StatusBar
+# Infinite Scroll com Paginacao no Cliente
 
-## Problema
-O conteudo do app esta sendo sobreposto pela barra de status e pela area do notch/camera, especialmente nos cantos superiores em dispositivos Android.
+## Resumo
+Implementar um sistema de carregamento progressivo (infinite scroll) em todas as listas de canais, filmes e series, renderizando 40 itens por vez e carregando mais conforme o usuario rola. Extrair os cards em componentes memoizados para evitar re-renders desnecessarios.
 
-## Solucao
+---
 
-### 1. Habilitar viewport-fit=cover no index.html
-Adicionar `viewport-fit=cover` na meta tag viewport. Isso e obrigatorio para que as variaveis CSS `env(safe-area-inset-*)` funcionem corretamente.
+## Passo 1: Criar hook `useInfiniteScroll`
 
-### 2. Aplicar padding de Safe Area no #root (index.css)
-Adicionar padding dinamico ao `#root` usando `env(safe-area-inset-*)` para empurrar todo o conteudo para fora das areas perigosas (notch, status bar, navigation bar).
+Criar `src/hooks/use-infinite-scroll.ts` com a logica reutilizavel:
+- Estado `limit` iniciando em 40
+- Ref para o elemento sentinela
+- `IntersectionObserver` que incrementa `limit` em +40 quando a sentinela aparece
+- Retorna `{ limit, sentinelRef, hasMore }` onde `hasMore = limit < totalItems`
+- Reset do `limit` para 40 quando `totalItems` mudar (troca de categoria)
 
-Regra CSS atualizada:
+## Passo 2: Criar componentes memoizados dos cards
+
+Criar `src/components/ChannelCard.tsx`:
+- Extrair o JSX do card de canal das paginas `LiveTvSplitPage` e `LiveTvPage`
+- Envolver com `React.memo`
+- Adicionar `loading="lazy"` e `decoding="async"` nas imagens
+
+Criar `src/components/MovieCard.tsx`:
+- Extrair o JSX do card de filme de `MoviesSplitPage` e `MoviesPage`
+- Envolver com `React.memo`
+- Adicionar `loading="lazy"` e `decoding="async"` nas imagens
+
+Criar `src/components/SeriesCard.tsx`:
+- Extrair o JSX do card de serie de `SeriesSplitPage` e `SeriesPage`
+- Envolver com `React.memo`
+- Adicionar `loading="lazy"` e `decoding="async"` nas imagens
+
+## Passo 3: Aplicar infinite scroll nas paginas
+
+Paginas afetadas (6 no total):
+1. `LiveTvSplitPage.tsx` -- grid de canais com `filteredStreams.slice(0, limit)`
+2. `LiveTvPage.tsx` -- cada secao de categoria com limite individual ou limite global
+3. `MoviesSplitPage.tsx` -- grid de filmes com `movies.slice(0, limit)`
+4. `MoviesPage.tsx` -- grid de filmes com `movies.slice(0, limit)`
+5. `SeriesSplitPage.tsx` -- grid de series com `seriesList.slice(0, limit)`
+6. `SeriesPage.tsx` -- grid de series com `series.slice(0, limit)`
+
+Em cada pagina:
+- Importar `useInfiniteScroll`
+- Renderizar `items.slice(0, limit)` no grid
+- Adicionar elemento sentinela (div com spinner) apos o grid
+- Adicionar `style={{ contentVisibility: 'auto' }}` no container do grid
+
+## Passo 4: Elemento sentinela
+
+Abaixo do grid, renderizar:
 ```text
-html, body, #root {
-  bg-background text-foreground;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
-  padding-bottom: env(safe-area-inset-bottom);
-  box-sizing: border-box;
-}
+{hasMore && (
+  <div ref={sentinelRef} className="flex justify-center py-6">
+    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+  </div>
+)}
 ```
-
-Tambem garantir que `body` tenha `background-color: black` para que qualquer espaco extra do safe-area fique escuro (nao branco).
-
-### 3. Ajustar o botao Voltar da MovieDetailsPage
-O botao flutuante `fixed top-4 left-4` precisa respeitar a safe area. Trocar para usar `top: calc(1rem + env(safe-area-inset-top))` e `left: calc(1rem + env(safe-area-inset-left))` via classe utilitaria CSS ou inline style.
-
-### 4. Ajustar a BottomNav
-A nav inferior ja tem a classe `safe-area-pb` mas precisamos garantir que o padding bottom funcione. Adicionar uma classe utilitaria `safe-area-pb` no CSS caso nao exista.
 
 ---
 
 ## Detalhes Tecnicos
 
+### Hook `useInfiniteScroll`
+```text
+function useInfiniteScroll(totalItems: number, pageSize = 40) {
+  const [limit, setLimit] = useState(pageSize);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset ao trocar categoria
+  useEffect(() => { setLimit(pageSize); }, [totalItems, pageSize]);
+
+  // Observer
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setLimit(prev => Math.min(prev + pageSize, totalItems));
+    }, { rootMargin: '200px' });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [totalItems, pageSize]);
+
+  return { limit, sentinelRef, hasMore: limit < totalItems };
+}
+```
+
+### CSS Containment
+Adicionar inline style `contentVisibility: 'auto'` nos containers de grid para que o browser pule a renderizacao dos itens fora da viewport.
+
+### Lazy Loading
+Todas as tags `<img>` dos cards terao `loading="lazy"` e `decoding="async"`.
+
+### Arquivos criados
+1. `src/hooks/use-infinite-scroll.ts`
+2. `src/components/ChannelCard.tsx`
+3. `src/components/MovieCard.tsx`
+4. `src/components/SeriesCard.tsx`
+
 ### Arquivos modificados
+1. `src/pages/LiveTvSplitPage.tsx`
+2. `src/pages/LiveTvPage.tsx`
+3. `src/pages/MoviesSplitPage.tsx`
+4. `src/pages/MoviesPage.tsx`
+5. `src/pages/SeriesSplitPage.tsx`
+6. `src/pages/SeriesPage.tsx`
 
-1. **index.html** -- Adicionar `viewport-fit=cover` na meta viewport
-2. **src/index.css** -- Adicionar safe-area padding no `#root`, background preto no body, e classe utilitaria `safe-area-pb`
-3. **src/pages/MovieDetailsPage.tsx** -- Ajustar posicao do botao Voltar para respeitar safe-area insets
-
-### Impacto
-A correcao e global: todas as paginas do app serao automaticamente empurradas para dentro da area segura. Paginas com elementos `fixed` (como o botao Voltar da MovieDetailsPage) precisam de ajuste individual.
+### Impacto no layout
+Nenhum. O grid permanece identico (mesmas colunas, gaps, tamanhos). A unica diferenca visivel e que a barra de rolagem cresce conforme mais itens sao carregados, e um pequeno spinner aparece brevemente ao final da lista.
 
