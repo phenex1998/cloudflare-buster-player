@@ -1,87 +1,51 @@
 
 
-# Refatoracao Rigida dos Cards com Skeleton Loading
+# Correcao de Safe Area para Notch e StatusBar
 
-## Problema Raiz
-Os cards usam `flex-1` no container da imagem dentro de um botao com `aspect-ratio`. Quando a imagem falha, o `flex-1` colapsa para altura 0, quebrando o layout inteiro. O aspect-ratio no botao externo nao protege o container interno.
+## Problema
+O conteudo do app esta sendo sobreposto pela barra de status e pela area do notch/camera, especialmente nos cantos superiores em dispositivos Android.
 
-## Solucao: Container de Imagem com Aspect Ratio Rigido
+## Solucao
 
-A estrategia e mover o aspect-ratio para o container da imagem (nao no botao pai) e remover `flex-1`, garantindo que o bloco de imagem mantenha suas dimensoes independente do conteudo.
+### 1. Habilitar viewport-fit=cover no index.html
+Adicionar `viewport-fit=cover` na meta tag viewport. Isso e obrigatorio para que as variaveis CSS `env(safe-area-inset-*)` funcionem corretamente.
 
----
+### 2. Aplicar padding de Safe Area no #root (index.css)
+Adicionar padding dinamico ao `#root` usando `env(safe-area-inset-*)` para empurrar todo o conteudo para fora das areas perigosas (notch, status bar, navigation bar).
 
-## Alteracoes por Arquivo
-
-### 1. LiveTvSplitPage.tsx (Canais - aspect 16/9)
-
-**Grid**: Mudar minmax de `140px` para `160px` (canais horizontais precisam de mais largura).
-
-**Card (renderChannel)**:
-- Botao externo: remover `aspect-square`, usar apenas `flex flex-col overflow-hidden rounded-xl`
-- Container da imagem: trocar `flex-1` por `w-full aspect-video bg-[#1e1e1e]` (aspect-video = 16/9)
-- Imagem: manter `object-contain`, adicionar `transition-opacity duration-300`
-- Skeleton loading: mudar de `aspect-square` para `aspect-video`
-
-**Resultado**: Retangulo horizontal cinza fixo de 16:9, imagem aparece por cima com fade.
-
-### 2. MoviesSplitPage.tsx (Filmes - aspect 2/3)
-
-**Card (renderMovie)**:
-- Botao externo: remover `aspect-[2/3]`, usar apenas `flex flex-col overflow-hidden rounded-xl`
-- Container da imagem: trocar `flex-1` por `w-full aspect-[2/3] bg-[#1e1e1e]`
-- Imagem: manter `object-cover`, adicionar `transition-opacity duration-300`
-
-**Resultado**: Retangulo vertical cinza fixo de 2:3, imagem aparece por cima com fade.
-
-### 3. SeriesSplitPage.tsx (Series - aspect 2/3)
-
-**Card (renderSeriesCard)**:
-- Mesma abordagem dos filmes: aspect-ratio no container da imagem, nao no botao
-- Container da imagem: `w-full aspect-[2/3] bg-[#1e1e1e]`
-- Imagem: `object-cover`, `transition-opacity duration-300`
-
----
-
-## Padrao CSS do Card (aplicado em todos)
-
+Regra CSS atualizada:
 ```text
-<button className="bg-card rounded-xl border ... overflow-hidden">
-  <!-- Container rigido: NUNCA colapsa -->
-  <div className="relative w-full aspect-[2/3] bg-[#1e1e1e] flex items-center justify-center overflow-hidden">
-    {url ? (
-      <>
-        <img
-          src={url}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
-          onError={(e) => { e.currentTarget.style.display = 'none'; ... }}
-        />
-        <div style={{ display: 'none' }}>  <!-- fallback icon -->
-          <Icon />
-        </div>
-      </>
-    ) : (
-      <Icon />  <!-- sem URL -->
-    )}
-  </div>
-  <!-- Texto abaixo -->
-  <div className="p-2">
-    <p>Nome</p>
-  </div>
-</button>
+html, body, #root {
+  bg-background text-foreground;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+}
 ```
 
-Diferenca chave: a `<img>` agora usa `absolute inset-0` para flutuar dentro do container rigido, em vez de ser o elemento que define o tamanho. O container define seu tamanho via `aspect-[2/3]` ou `aspect-video` independentemente.
+Tambem garantir que `body` tenha `background-color: black` para que qualquer espaco extra do safe-area fique escuro (nao branco).
 
-## Grid com align-items: start
+### 3. Ajustar o botao Voltar da MovieDetailsPage
+O botao flutuante `fixed top-4 left-4` precisa respeitar a safe area. Trocar para usar `top: calc(1rem + env(safe-area-inset-top))` e `left: calc(1rem + env(safe-area-inset-left))` via classe utilitaria CSS ou inline style.
 
-Adicionar `items-start` nos gridComponents List de todas as 3 paginas para evitar que cards com textos de tamanhos diferentes estiqueem verticalmente.
+### 4. Ajustar a BottomNav
+A nav inferior ja tem a classe `safe-area-pb` mas precisamos garantir que o padding bottom funcione. Adicionar uma classe utilitaria `safe-area-pb` no CSS caso nao exista.
 
-## Resumo
+---
 
-| Arquivo | Mudanca principal |
-|---|---|
-| LiveTvSplitPage.tsx | aspect-video no container de imagem, grid 160px, items-start |
-| MoviesSplitPage.tsx | aspect-[2/3] no container de imagem, img absolute, items-start |
-| SeriesSplitPage.tsx | aspect-[2/3] no container de imagem, img absolute, items-start |
+## Detalhes Tecnicos
+
+### Arquivos modificados
+
+1. **index.html** -- Adicionar `viewport-fit=cover` na meta viewport
+2. **src/index.css** -- Adicionar safe-area padding no `#root`, background preto no body, e classe utilitaria `safe-area-pb`
+3. **src/pages/MovieDetailsPage.tsx** -- Ajustar posicao do botao Voltar para respeitar safe-area insets
+
+### Impacto
+A correcao e global: todas as paginas do app serao automaticamente empurradas para dentro da area segura. Paginas com elementos `fixed` (como o botao Voltar da MovieDetailsPage) precisam de ajuste individual.
 
