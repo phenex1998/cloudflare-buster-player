@@ -1,105 +1,83 @@
 
+# Correcao do Player Inline -- Diagnostico Real e Solucao
 
-# Correcao Definitiva: Usar mpegts.js para Streams .ts Inline
+## Problema Identificado
 
-## Problema
+Existem **dois problemas distintos** impedindo o player inline de funcionar:
 
-- A extensao `.m3u8` foi forçada mas a maioria dos servidores IPTV so serve `.ts` para canais ao vivo
-- HLS.js **nao consegue** reproduzir arquivos `.ts` diretos (precisa de manifesto `.m3u8`)
-- Tanto o inline quanto o fullscreen quebraram
+### Problema 1: Proxy Bufferiza o Stream Inteiro (Web)
+A edge function `iptv-proxy` faz `await response.arrayBuffer()` -- isso tenta ler o stream **inteiro** antes de retornar. Streams de TV ao vivo sao **infinitos**, entao a requisicao fica pendente para sempre e o video nunca carrega.
 
-## Solucao
+### Problema 2: mpegts.js pode falhar silenciosamente (Android WebView)
+No Android nativo (WebView), a URL vai direta sem proxy, mas o mpegts.js pode falhar silenciosamente sem feedback visual. Nao ha tratamento de erro visivel nem fallback.
 
-Substituir HLS.js por **mpegts.js** -- uma biblioteca feita especificamente para reproduzir streams MPEG2-TS (`.ts`) direto no browser via Media Source Extensions. Funciona no Chrome, WebView Android, e navegadores modernos.
+### Sobre o modo "embedded" do plugin Capacitor
+O plugin `@capgo/capacitor-video-player` documenta que o modo `embedded` funciona **apenas na Web** (browser puro). No Android/iOS nativo, apenas `fullscreen` e suportado. Tentar `embedded` no APK resultara em erro. Contudo, vamos adicionar o try/catch com alert conforme solicitado para que o erro fique visivel caso tente.
 
-## Mudancas
+## Solucao em 3 Partes
 
-### 1. Instalar mpegts.js
+### 1. Corrigir o Proxy para Streaming (`supabase/functions/iptv-proxy/index.ts`)
 
-Adicionar `mpegts.js` como dependencia do projeto (npm package: `mpegts.js`).
-
-### 2. `src/pages/LiveTvSplitPage.tsx` -- Reverter para `.ts`
-
-Linha 39: Mudar de `'m3u8'` de volta para `'ts'`.
-
-### 3. `src/components/InlinePlayer.tsx` -- Reescrever com mpegts.js
-
-Substituir toda a logica HLS.js por mpegts.js:
-
-**Playback inline:**
-- Criar instancia `mpegts.MediaPlayer` com `type: 'mpegts'` e `isLive: true`
-- Carregar a URL `.ts` diretamente
-- No Web: rotear pelo proxy (`iptv-proxy`) para contornar CORS
-- No Android nativo: usar URL direta (sem CORS no WebView)
-- Antes de trocar de canal: destruir player anterior (`player.destroy()`)
-
-**Fullscreen:**
-- Android nativo: usar `@capgo/capacitor-video-player` com `mode: 'fullscreen'` e URL `.ts` direta
-- Web: usar `requestFullscreen()` no elemento video
-
-**Fluxo ao trocar de canal:**
-```text
-1. Usuario clica no canal
-2. URL muda -> useEffect dispara
-3. Se existe player anterior -> player.destroy()
-4. Cria novo mpegts.MediaPlayer({ type: 'mpegts', isLive: true })
-5. player.attachMediaElement(videoElement)
-6. player.load() -- video comeca a tocar
-7. Video aparece inline na coluna da direita
-```
-
-## Detalhes Tecnicos
-
-### mpegts.js -- inicializacao
+Mudar de `await response.arrayBuffer()` (bufferiza tudo) para **streaming response** que repassa os bytes conforme chegam:
 
 ```text
-import mpegts from 'mpegts.js';
+// ANTES (quebrado para live streams):
+const body = await response.arrayBuffer();
+return new Response(body, ...);
 
-if (mpegts.isSupported()) {
-  const player = mpegts.createPlayer({
-    type: 'mpegts',
-    isLive: true,
-    url: proxiedOrDirectUrl,
-  }, {
-    enableWorker: true,
-    liveBufferLatencyChasing: true,
-    liveSync: true,
-  });
-  player.attachMediaElement(videoElement);
-  player.load();
-  player.play();
-}
+// DEPOIS (streaming):
+return new Response(response.body, {
+  status: response.status,
+  headers: { ...corsHeaders, 'Content-Type': contentType },
+});
 ```
 
-### Proxy (apenas Web)
+Isso resolve o problema no Web -- o mpegts.js recebera os dados incrementalmente.
 
+### 2. Refatorar InlinePlayer com as 3 Regras de Ouro (`src/components/InlinePlayer.tsx`)
+
+**Regra 1 -- Dimensoes Explicitas:**
+- Adicionar `min-height: 300px` e borda vermelha temporaria no container do video
+- Garantir que o container tenha dimensoes reais antes de qualquer inicializacao
+
+**Regra 2 -- Atraso de Seguranca:**
+- Envolver a inicializacao do mpegts.js em `setTimeout` de 200ms
+- Usar `useEffect` monitorando mudanca de URL
+
+**Regra 3 -- Tratamento de Erro com Feedback Visual:**
+- try/catch em toda inicializacao
+- `console.error` + estado de erro visivel na UI com a mensagem real
+- Em ambiente nativo, tentar Capacitor embedded mode com try/catch + alert para diagnostico
+- Se falhar, fazer fallback para `<video src>` direto
+
+**Logica de playback com fallback:**
 ```text
-function getProxiedUrl(url: string): string {
-  if (isAndroid()) return url;
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  return `${supabaseUrl}/functions/v1/iptv-proxy?url=${encodeURIComponent(url)}`;
-}
+1. URL muda -> useEffect dispara
+2. Limpar player anterior (destroy)
+3. setTimeout 200ms para garantir container renderizado
+4. Tentar mpegts.js com a URL (proxied no web, direta no nativo)
+5. Se mpegts falhar -> fallback: video.src = url direto
+6. Se tudo falhar -> mostrar erro na UI com mensagem real
 ```
 
-### Fullscreen nativo
+**Tentativa Capacitor embedded (diagnostico):**
+- No Android nativo, apos falha do mpegts.js, tentar `VideoPlayer.initPlayer({ mode: 'embedded' })` com try/catch
+- O alert mostrara a mensagem de erro real do plugin (provavelmente "embedded not supported on native")
+- Isso serve como diagnostico, nao como solucao permanente
 
-```text
-// Android: plugin Capacitor com URL .ts direta
-VideoPlayer.initPlayer({ mode: 'fullscreen', url: cleanUrl, ... });
-// Web: requestFullscreen()
-videoRef.current.requestFullscreen();
-```
+### 3. Manter Fullscreen Nativo Funcionando
+
+O botao "Expandir" continuara usando o plugin Capacitor com `mode: 'fullscreen'` no Android (ExoPlayer) -- isso funciona e nao sera alterado.
 
 ## Arquivos Modificados
 
-1. `package.json` -- adicionar dependencia `mpegts.js`
-2. `src/pages/LiveTvSplitPage.tsx` -- reverter extensao para `'ts'` (1 linha)
-3. `src/components/InlinePlayer.tsx` -- reescrever: remover HLS.js, usar mpegts.js
+1. **`supabase/functions/iptv-proxy/index.ts`** -- Mudar para streaming response (nao bufferizar)
+2. **`src/components/InlinePlayer.tsx`** -- Aplicar as 3 regras de ouro + fallback chain + diagnostico
 
 ## Resultado Esperado
 
-- Streams `.ts` reproduzem inline na coluna da direita (Android APK e Web)
-- Trocar de canal destroi o player anterior sem sobreposicao de audio
-- Botao Expandir funciona: fullscreen nativo no Android, requestFullscreen no Web
-- Filmes e Series continuam funcionando (usam extensoes proprias como `.mp4`)
-
+- **Web (preview)**: Proxy faz streaming -> mpegts.js recebe dados -> video toca inline
+- **Android (APK)**: URL direta -> mpegts.js no WebView -> video toca inline
+- **Fallback**: Se mpegts.js falhar, tenta `<video src>` direto
+- **Diagnostico**: Erros aparecem visivelmente na UI e no console com mensagens reais
+- **Borda vermelha temporaria**: Confirma visualmente que o container existe e tem dimensoes
