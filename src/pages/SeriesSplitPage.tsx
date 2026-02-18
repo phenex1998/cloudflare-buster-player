@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useIptv } from '@/contexts/IptvContext';
 import { xtreamApi, SeriesInfo } from '@/lib/xtream-api';
 import { playFullscreen } from '@/lib/native-player';
 import IconSidebar from '@/components/IconSidebar';
+import SeriesCard from '@/components/SeriesCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MonitorPlay, Play, ArrowLeft } from 'lucide-react';
+import { Play, ArrowLeft, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useInfiniteScroll } from '@/hooks/use-infinite-scroll';
 
 const SeriesSplitPage: React.FC = () => {
   const { credentials, addToHistory } = useIptv();
@@ -34,10 +36,12 @@ const SeriesSplitPage: React.FC = () => {
     enabled: !!credentials && !!selectedSeries,
   });
 
+  const { limit, sentinelRef, hasMore } = useInfiniteScroll(seriesList.length);
+
   const episodes = seriesDetail?.episodes?.[String(selectedSeason)] || [];
   const seasons = seriesDetail?.seasons || [];
 
-  const handlePlayEpisode = async (ep: typeof episodes[0]) => {
+  const handlePlayEpisode = useCallback(async (ep: typeof episodes[0]) => {
     if (!credentials || !selectedSeries) return;
     const url = xtreamApi.getSeriesStreamUrl(credentials, ep.id, ep.container_extension);
     const title = `${selectedSeries.name} - ${ep.title}`;
@@ -47,7 +51,7 @@ const SeriesSplitPage: React.FC = () => {
     if (result === 'web-fallback') {
       navigate('/player', { state: { url, title, type: 'series' } });
     }
-  };
+  }, [credentials, selectedSeries, addToHistory, navigate]);
 
   return (
     <div className="w-full h-full flex overflow-hidden">
@@ -87,7 +91,7 @@ const SeriesSplitPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main area: series grid OR episode list */}
+      {/* Main area */}
       <div className="flex-1 h-full flex flex-col overflow-hidden">
         {!selectedSeries ? (
           <>
@@ -104,27 +108,24 @@ const SeriesSplitPage: React.FC = () => {
                   ))}
                 </div>
               ) : (
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-                  {seriesList.map(s => (
-                    <button
-                      key={s.series_id}
-                      onClick={() => { setSelectedSeries(s); setSelectedSeason(1); }}
-                      className="bg-[#1a1a1a] rounded-xl border border-white/5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all aspect-[2/3] flex flex-col overflow-hidden"
-                    >
-                      <div className="flex-1 w-full overflow-hidden flex items-center justify-center bg-black/20">
-                        {s.cover ? (
-                          <img src={s.cover} alt="" className="w-full h-full object-cover" loading="lazy" />
-                        ) : (
-                          <MonitorPlay className="w-8 h-8 text-muted-foreground" />
-                        )}
-                      </div>
-                      <div className="p-2">
-                        <p className="text-[11px] text-center text-foreground truncate">{s.name}</p>
-                        {s.rating && <p className="text-[10px] text-center text-muted-foreground">⭐ {s.rating}</p>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3" style={{ contentVisibility: 'auto' }}>
+                    {seriesList.slice(0, limit).map(s => (
+                      <SeriesCard
+                        key={s.series_id}
+                        name={s.name}
+                        cover={s.cover}
+                        rating={s.rating}
+                        onClick={() => { setSelectedSeries(s); setSelectedSeason(1); }}
+                      />
+                    ))}
+                  </div>
+                  {hasMore && (
+                    <div ref={sentinelRef} className="flex justify-center py-6">
+                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </>
@@ -140,7 +141,6 @@ const SeriesSplitPage: React.FC = () => {
               <h2 className="text-sm font-bold text-foreground truncate">{selectedSeries.name}</h2>
             </div>
 
-            {/* Season selector */}
             {seasons.length > 0 && (
               <div className="px-4 py-2 flex gap-1.5 overflow-x-auto no-scrollbar border-b border-border">
                 {seasons.map(s => (
@@ -160,7 +160,6 @@ const SeriesSplitPage: React.FC = () => {
               </div>
             )}
 
-            {/* Episodes grid */}
             <div className="flex-1 overflow-y-auto no-scrollbar p-4">
               <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
                 {episodes.map(ep => (
